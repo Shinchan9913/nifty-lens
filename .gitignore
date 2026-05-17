@@ -1,0 +1,10 @@
+# Environment variables (API keys, secrets)
+.env
+
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
