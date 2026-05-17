@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.1
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --reserve-memory
+      - 0M
+      - --overprovisioned
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+      - --pandaproxy-addr
+      - 0.0.0.0:8082
+      - --advertise-pandaproxy-addr
+      - localhost:8082
+    ports:
+      - "9092:9092"       # Kafka API (outside)
+      - "29092:29092"     # Kafka API (internal)
+      - "8082:8082"       # PandaProxy REST API
+      - "9644:9644"       # Admin API
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health --brokers localhost:29092 | grep -q 'Healthy'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12
+    container_name: clickhouse
+    ports:
+      - "8123:8123"       # HTTP API
+      - "9000:9000"       # Native protocol
+      - "9009:9009"       # Intra-cluster communication
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  create-topics:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.1
+    container_name: create-topics
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+        rpk topic create trades_raw --brokers redpanda:29092 --partitions 3 --replicas 1 || true;
+        echo '✅ Topics created';
+      "
+
+volumes:
+  clickhouse_data:

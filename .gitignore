@@ -7,4 +7,10 @@ venv/
 __pycache__/
 *.pyc
 *.pyo
+
+# Node.js / Dashboard
+node_modules/
+dist/
+
+# OS
 .DS_Store
