@@ -1,41 +1,31 @@
--- ============================================================
--- ClickHouse Schema for Real-Time FinTech Analytics
--- Unified table for both historical (Groww API) + live data
--- ============================================================
-
--- Raw trades table
-CREATE TABLE IF NOT EXISTS trades_raw (
-    trade_id        UUID,
+-- Groww tick data: one-minute candles per symbol
+CREATE TABLE IF NOT EXISTS tick_data (
     symbol          String,
-    price           Float64,
-    quantity        Float64,
-    side            Enum8('buy' = 1, 'sell' = -1),
-    region          LowCardinality(String),
-    asset_class     LowCardinality(String),
-    exchange        LowCardinality(String),
+    exchange        String,
     timestamp       DateTime64(3, 'Asia/Kolkata'),
-    ingested_at     DateTime DEFAULT now()
+    open            Float64,
+    high            Float64,
+    low             Float64,
+    close           Float64,
+    volume          Float64
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(timestamp)
-ORDER BY (symbol, toStartOfHour(timestamp), region)
-TTL timestamp + INTERVAL 90 DAY DELETE;
+ORDER BY (symbol, timestamp);
 
--- 1-minute aggregated materialized view
-CREATE MATERIALIZED VIEW IF NOT EXISTS trades_agg_1min
-ENGINE = SummingMergeTree()
-PARTITION BY toYYYYMM(minute)
-ORDER BY (symbol, minute, region)
+-- Materialized view: 5-min candles from 1-min data
+CREATE MATERIALIZED VIEW IF NOT EXISTS tick_data_5min
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(window_start)
+ORDER BY (symbol, window_start)
 AS SELECT
     symbol,
-    toStartOfMinute(timestamp) AS minute,
-    region,
     exchange,
-    count()                         AS trade_count,
-    sum(price * quantity)           AS volume,
-    min(price)                      AS price_min,
-    max(price)                      AS price_max,
-    max(price) - min(price)         AS price_range,
-    avg(price)                      AS price_avg
-FROM trades_raw
-GROUP BY symbol, minute, region, exchange;
+    toStartOfFiveMinutes(timestamp) AS window_start,
+    argMin(open, timestamp) AS open,
+    max(high) AS high,
+    min(low) AS low,
+    argMax(close, timestamp) AS close,
+    sum(volume) AS volume
+FROM tick_data
+GROUP BY symbol, exchange, window_start;
