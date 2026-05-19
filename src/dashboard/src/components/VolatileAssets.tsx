@@ -11,11 +11,14 @@ import {
 
 interface Asset {
   symbol: string;
-  region: string;
-  asset_class: string;
-  trade_count: number;
-  price_range: number;
-  avg_price: number;
+  exchange: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  change_pct: number;
+  range_pct: number;
+  total_volume: number;
 }
 
 const API_BASE = "http://localhost:8000";
@@ -41,7 +44,7 @@ export default function VolatileAssets() {
 
   const chartData = assets.map((a) => ({
     name: a.symbol,
-    "Price Range": Math.round(a.price_range * 100) / 100,
+    "Range %": Math.round(a.range_pct * 100) / 100,
   }));
 
   return (
@@ -53,22 +56,28 @@ export default function VolatileAssets() {
             <thead>
               <tr>
                 <th>Symbol</th>
-                <th>Region</th>
-                <th>Class</th>
-                <th>Trades</th>
-                <th>Range</th>
-                <th>Avg Price</th>
+                <th>Exchange</th>
+                <th>Open</th>
+                <th>High</th>
+                <th>Low</th>
+                <th>Close</th>
+                <th>Change %</th>
+                <th>Range %</th>
               </tr>
             </thead>
             <tbody>
               {assets.map((a) => (
                 <tr key={a.symbol}>
                   <td><strong>{a.symbol}</strong></td>
-                  <td>{a.region}</td>
-                  <td>{a.asset_class}</td>
-                  <td>{a.trade_count.toLocaleString()}</td>
-                  <td>${a.price_range.toFixed(2)}</td>
-                  <td>${a.avg_price.toFixed(2)}</td>
+                  <td>{a.exchange}</td>
+                  <td>${a.open.toFixed(2)}</td>
+                  <td>${a.high.toFixed(2)}</td>
+                  <td>${a.low.toFixed(2)}</td>
+                  <td>${a.close.toFixed(2)}</td>
+                  <td style={{ color: a.change_pct >= 0 ? "#10b981" : "#ef4444" }}>
+                    {a.change_pct >= 0 ? "+" : ""}{a.change_pct}%
+                  </td>
+                  <td>{a.range_pct}%</td>
                 </tr>
               ))}
             </tbody>
@@ -83,7 +92,7 @@ export default function VolatileAssets() {
               <Tooltip
                 contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8 }}
               />
-              <Bar dataKey="Price Range" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Range %" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

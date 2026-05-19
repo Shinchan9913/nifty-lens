@@ -1,23 +1,18 @@
 # 📊 Real-Time FinTech Analytics Engine
 
-A **Lambda Architecture** pipeline that processes 5,000 mock transactions/second using ClickHouse, Redpanda (Kafka-compatible), and a React dashboard.
+A **real-time analytics pipeline** that processes 5,000 mock transactions/second directly into ClickHouse, served via a FastAPI backend and a React dashboard.
 
 **Resume bullet:**
-> "Built a real-time financial analytics engine processing 5,000 mock transactions/sec using ClickHouse and Kafka, reducing dashboard aggregation latency from 4.2 seconds (SQL) to under 80 milliseconds."
+> "Built a real-time financial analytics engine processing 5,000 mock transactions/sec directly into ClickHouse, reducing dashboard aggregation latency from 4.2 seconds (SQL) to under 80 milliseconds."
 
 ## Architecture
 
 ```
 Trade Simulator (Python)
-       │  5,000 trades/sec
-       ▼
-   ┌─────────────┐
-   │   Redpanda   │  ← Kafka-compatible stream
-   └──────┬──────┘
-          │
-          ▼
+        │  5,000 trades/sec (batched)
+        ▼
    ┌──────────────┐
-   │  ClickHouse   │  ← Columnar OLAP database
+   │  ClickHouse   │  ← Columnar OLAP database (Docker)
    │  (Docker)     │
    └──────┬───────┘
           │
@@ -32,10 +27,8 @@ Trade Simulator (Python)
 
 | Layer | Technology |
 |---|---|
-| **Stream Queue** | Redpanda (Kafka-compatible, Docker) |
 | **Database** | ClickHouse (columnar OLAP, Docker) |
-| **Data Simulator** | Python (`kafka-python`) |
-| **Consumer** | Python → ClickHouse HTTP API |
+| **Data Simulator** | Python (`requests` → ClickHouse HTTP API) |
 | **API** | FastAPI (Python) |
 | **Dashboard** | React + Vite + Recharts (TypeScript) |
 | **Python Version** | 3.13.13 (managed via pyenv) |
@@ -45,14 +38,14 @@ Trade Simulator (Python)
 
 ```
 nifty-lens/
-├── docker-compose.yml           # Redpanda + ClickHouse
+├── docker-compose.yml           # ClickHouse
 ├── init-scripts/
 │   └── 01_schema.sql            # ClickHouse table + MV schemas
 ├── src/
+│   ├── ingestor/
+│   │   └── groww_ingestor.py    # Real-time data from Groww → ClickHouse
 │   ├── simulator/
-│   │   └── producer.py          # Generates 5,000 trades/sec
-│   ├── consumer/
-│   │   └── consumer.py          # Redpanda → ClickHouse ingestion
+│   │   └── producer.py          # Synthetic data generator (24/7 fallback)
 │   ├── api/
 │   │   └── main.py              # FastAPI backend
 │   ├── dashboard/               # React + Vite frontend
@@ -65,7 +58,7 @@ nifty-lens/
 │   │   │       └── VolumeChart.tsx    # Volume by region pie
 │   │   └── package.json
 │   ├── config.py                # .env loader
-│   └── main.py                  # Groww API test (legacy)
+│   └── main.py                  # Groww API test script
 └── .env                         # API keys (gitignored)
 ```
 
@@ -88,38 +81,40 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
-pip install kafka-python requests fastapi uvicorn
+pip install requests fastapi uvicorn
 ```
 
 ### Infrastructure (Docker)
 
 ```bash
-# Start ClickHouse + Redpanda
+# Start ClickHouse
 docker compose up -d
 
-# Verify both are healthy
+# Verify it's healthy
 docker compose ps
 ```
 
 ClickHouse will be available at **http://localhost:8123** (HTTP API).  
 The schema (`01_schema.sql`) auto-runs on first startup, creating:
 - `trades_raw` — unified trade storage table
-- `trades_agg_1min` — materialized view for fast aggregations
+- `trades_tps` — materialized view for trades-per-second metrics
+- `trades_agg_1min` — materialized view for 1-minute aggregations
 
 ### Run the Pipeline
 
-Open **4 terminals**:
+Open **terminals** for each component:
 
-**Terminal 1 — Trade Simulator:**
+**Terminal 1 — Groww Ingestor (real-time data during market hours):**
+```bash
+source .venv/bin/activate
+python src/ingestor/groww_ingestor.py
+```
+> 💡 The ingestor fetches real OHLCV data from Groww for NIFTY, BANKNIFTY, and major stocks. Outside market hours (9:15 AM - 3:30 PM IST, Mon-Fri), it sleeps and lets the simulator provide synthetic data.
+
+**Terminal 2 — Trade Simulator (synthetic fallback, runs 24/7):**
 ```bash
 source .venv/bin/activate
 python src/simulator/producer.py
-```
-
-**Terminal 2 — ClickHouse Consumer:**
-```bash
-source .venv/bin/activate
-python src/consumer/consumer.py
 ```
 
 **Terminal 3 — FastAPI Backend:**

@@ -1,0 +1,1 @@
+# Groww API Ingestor — fetches real-time market data and inserts into ClickHouse

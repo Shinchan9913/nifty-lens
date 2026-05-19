@@ -1,131 +1,160 @@
 """
-Trade Simulator — produces 5,000 mock transactions/sec to Redpanda.
+Trade Simulator — generates 1-minute OHLCV candles directly to ClickHouse.
 
-Simulates realistic financial trades across crypto, equity, and commodities.
+Simulates realistic tick-level price action for crypto, equity, and commodities.
+Aggregates ticks into 1-minute OHLCV candles and inserts into tick_data.
+Uses ClickHouse async_insert with JSONEachRow format.
 """
 import json
-import uuid
 import time
 import random
 import logging
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timezone, timedelta
 
-from kafka import KafkaProducer
+import requests
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-REDPANDA_BROKER = "localhost:9092"
-TOPIC = "trades_raw"
-TARGET_TPS = 5000
+CLICKHOUSE_URL = "http://localhost:8123"
+CLICKHOUSE_DB = "default"
+CLICKHOUSE_TABLE = "tick_data"
+
+# ClickHouse async insert
+INSERT_URL = (
+    f"{CLICKHOUSE_URL}"
+    f"?async_insert=1"
+    f"&wait_for_async_insert=0"
+    f"&query=INSERT INTO {CLICKHOUSE_DB}.{CLICKHOUSE_TABLE} FORMAT JSONEachRow"
+)
 
 # Realistic instrument pool
 INSTRUMENTS = [
     # Crypto
-    {"symbol": "BTC/USD", "asset_class": "crypto", "region": "US", "base_price": 67500, "volatility": 0.02},
-    {"symbol": "ETH/USD", "asset_class": "crypto", "region": "US", "base_price": 3500, "volatility": 0.025},
-    {"symbol": "SOL/USD", "asset_class": "crypto", "region": "US", "base_price": 145, "volatility": 0.03},
+    {"symbol": "BTC/USD", "exchange": "CRYPTO", "base_price": 67500, "volatility": 0.02},
+    {"symbol": "ETH/USD", "exchange": "CRYPTO", "base_price": 3500, "volatility": 0.025},
+    {"symbol": "SOL/USD", "exchange": "CRYPTO", "base_price": 145, "volatility": 0.03},
     # Indian equities
-    {"symbol": "RELIANCE", "asset_class": "equity", "region": "APAC", "base_price": 2850, "volatility": 0.008},
-    {"symbol": "TCS", "asset_class": "equity", "region": "APAC", "base_price": 4100, "volatility": 0.007},
-    {"symbol": "HDFCBANK", "asset_class": "equity", "region": "APAC", "base_price": 1680, "volatility": 0.009},
-    {"symbol": "INFY", "asset_class": "equity", "region": "APAC", "base_price": 1520, "volatility": 0.01},
-    {"symbol": "ICICIBANK", "asset_class": "equity", "region": "APAC", "base_price": 1150, "volatility": 0.01},
+    {"symbol": "RELIANCE", "exchange": "NSE", "base_price": 2850, "volatility": 0.008},
+    {"symbol": "TCS", "exchange": "NSE", "base_price": 4100, "volatility": 0.007},
+    {"symbol": "HDFCBANK", "exchange": "NSE", "base_price": 1680, "volatility": 0.009},
+    {"symbol": "INFY", "exchange": "NSE", "base_price": 1520, "volatility": 0.01},
+    {"symbol": "ICICIBANK", "exchange": "NSE", "base_price": 1150, "volatility": 0.01},
     # US equities
-    {"symbol": "AAPL", "asset_class": "equity", "region": "US", "base_price": 210, "volatility": 0.012},
-    {"symbol": "TSLA", "asset_class": "equity", "region": "US", "base_price": 245, "volatility": 0.02},
-    {"symbol": "GOOGL", "asset_class": "equity", "region": "US", "base_price": 175, "volatility": 0.011},
+    {"symbol": "AAPL", "exchange": "NSE", "base_price": 210, "volatility": 0.012},
+    {"symbol": "TSLA", "exchange": "NSE", "base_price": 245, "volatility": 0.02},
+    {"symbol": "GOOGL", "exchange": "NSE", "base_price": 175, "volatility": 0.011},
     # Commodities
-    {"symbol": "GOLD", "asset_class": "commodity", "region": "US", "base_price": 2350, "volatility": 0.005},
-    {"symbol": "SILVER", "asset_class": "commodity", "region": "US", "base_price": 28, "volatility": 0.008},
-    {"symbol": "CRUDEOIL", "asset_class": "commodity", "region": "EU", "base_price": 78, "volatility": 0.015},
+    {"symbol": "GOLD", "exchange": "MCX", "base_price": 2350, "volatility": 0.005},
+    {"symbol": "SILVER", "exchange": "MCX", "base_price": 28, "volatility": 0.008},
+    {"symbol": "CRUDEOIL", "exchange": "MCX", "base_price": 78, "volatility": 0.015},
     # European equities
-    {"symbol": "SAP.DE", "asset_class": "equity", "region": "EU", "base_price": 180, "volatility": 0.01},
-    {"symbol": "SIE.DE", "asset_class": "equity", "region": "EU", "base_price": 145, "volatility": 0.009},
+    {"symbol": "SAP.DE", "exchange": "NSE", "base_price": 180, "volatility": 0.01},
+    {"symbol": "SIE.DE", "exchange": "NSE", "base_price": 145, "volatility": 0.009},
 ]
 
-EXCHANGES = {
-    "crypto": "CRYPTO",
-    "equity": "NSE",
-    "commodity": "MCX",
-}
-
-# Maintain a running price for each instrument (random walk)
+# Maintain running price for each instrument
 prices = {inst["symbol"]: inst["base_price"] for inst in INSTRUMENTS}
 
+# Simulated ticks per minute per symbol (affects OHLC variation)
+TICKS_PER_SYMBOL_PER_MIN = 1000
 
-def generate_trade() -> dict:
-    """Generate a single mock trade."""
-    inst = random.choice(INSTRUMENTS)
-    symbol = inst["symbol"]
 
-    # Random walk price
-    delta = prices[symbol] * random.gauss(0, inst["volatility"])
-    prices[symbol] = max(prices[symbol] + delta, inst["base_price"] * 0.1)
+def generate_tick(symbol: str, base_price: float, volatility: float) -> float:
+    """Generate a single tick price via random walk."""
+    delta = prices[symbol] * random.gauss(0, volatility)
+    prices[symbol] = max(prices[symbol] + delta, base_price * 0.1)
+    return prices[symbol]
 
-    quantity = random.choice([
-        random.randint(1, 100),    # retail
-        random.randint(100, 1000),  # HNI
-        random.randint(1000, 10000), # institutional
-    ])
 
-    # Region-weighted distribution (APAC heavy for Indian market bias)
-    region_weights = {"US": 0.25, "APAC": 0.55, "EU": 0.20}
-    region = random.choices(list(region_weights.keys()), weights=list(region_weights.values()))[0]
+def generate_candle(symbol: str, exchange: str, base_price: float, volatility: float) -> dict:
+    """Simulate ticks for one minute and return an OHLCV candle."""
+    ticks = [generate_tick(symbol, base_price, volatility) for _ in range(TICKS_PER_SYMBOL_PER_MIN)]
+
+    open_price = ticks[0]
+    high_price = max(ticks)
+    low_price = min(ticks)
+    close_price = ticks[-1]
+    volume = sum(
+        random.choice([
+            random.randint(1, 100),      # retail
+            random.randint(100, 1000),   # HNI
+            random.randint(1000, 10000), # institutional
+        ])
+        for _ in ticks
+    )
+
+    # Use Asia/Kolkata timezone — matches the ClickHouse column's DateTime64 timezone
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(IST)
+    # Round down to the nearest minute for the candle timestamp
+    ts = now.replace(second=0, microsecond=0)
 
     return {
-        "trade_id": str(uuid.uuid4()),
         "symbol": symbol,
-        "price": round(prices[symbol], 2),
-        "quantity": quantity,
-        "side": random.choice(["buy", "sell"]),
-        "region": region,
-        "asset_class": inst["asset_class"],
-        "exchange": EXCHANGES[inst["asset_class"]],
-        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+        "exchange": exchange,
+        "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S"),
+        "open": round(open_price, 2),
+        "high": round(high_price, 2),
+        "low": round(low_price, 2),
+        "close": round(close_price, 2),
+        "volume": volume,
     }
 
 
 def main():
-    logger.info("🚀 Starting trade simulator — target: %d txn/sec to %s", TARGET_TPS, REDPANDA_BROKER)
+    logger.info("🚀 Starting OHLCV candle simulator — %d symbols, 1-min candles to ClickHouse", len(INSTRUMENTS))
 
-    producer = KafkaProducer(
-        bootstrap_servers=REDPANDA_BROKER,
-        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-        acks="1",
-        compression_type="gzip",
-        linger_ms=10,
-        batch_size=32768,
-    )
-
-    sent = 0
-    batch_start = time.monotonic()
-    interval = 1.0  # 1 second reporting window
+    total_candles = 0
+    next_minute = math.ceil(time.time() / 60) * 60
 
     try:
         while True:
-            trade = generate_trade()
-            producer.send(TOPIC, value=trade)
-            sent += 1
+            # Sleep until the start of the next minute
+            now = time.time()
+            sleep_seconds = next_minute - now
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
 
-            if sent >= TARGET_TPS:
-                # Rate limiting: sleep if we're ahead of schedule
-                elapsed = time.monotonic() - batch_start
-                if elapsed < 1.0:
-                    time.sleep(1.0 - elapsed)
-                batch_start = time.monotonic()
-                sent = 0
+            # Generate one candle per symbol for this minute
+            candles = []
+            for inst in INSTRUMENTS:
+                candle = generate_candle(
+                    symbol=inst["symbol"],
+                    exchange=inst["exchange"],
+                    base_price=inst["base_price"],
+                    volatility=inst["volatility"],
+                )
+                candles.append(candle)
 
-            # Log throughput every second
-            if sent % TARGET_TPS == 0:
-                logger.info("📊 Throughput: %d trades/sec", TARGET_TPS)
+            # Batch insert all candles for this minute
+            for candle in candles:
+                try:
+                    requests.post(
+                        INSERT_URL,
+                        data=json.dumps(candle),
+                        auth=("default", "admin"),
+                        timeout=5,
+                    )
+                except Exception as e:
+                    logger.error("❌ Insert failed: %s | symbol: %s", e, candle["symbol"])
+
+            total_candles += len(candles)
+            logger.info(
+                "📊 Inserted %d candles at %s (total: %d)",
+                len(candles),
+                candles[0]["timestamp"],
+                total_candles,
+            )
+
+            next_minute += 60
 
     except KeyboardInterrupt:
         logger.info("🛑 Simulator stopped")
     finally:
-        producer.flush()
-        producer.close()
+        logger.info("Total candles sent: %d", total_candles)
 
 
 if __name__ == "__main__":

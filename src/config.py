@@ -3,8 +3,8 @@
 import os
 from dotenv import load_dotenv
 
-# Load variables from .env file (located in project root)
-load_dotenv()
+# Load variables from .env file (located next to this file)
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 
 def get_groww_credentials() -> dict:

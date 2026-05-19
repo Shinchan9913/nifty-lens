@@ -11,9 +11,8 @@ import {
 const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
 
 interface VolumeData {
-  region: string;
-  asset_class: string;
-  trade_count: number;
+  exchange: string;
+  candle_count: number;
   total_volume: number;
 }
 
@@ -38,37 +37,29 @@ export default function VolumeChart() {
     return () => clearInterval(interval);
   }, []);
 
-  // Aggregate by region for the pie chart
-  const regionTotals = data.reduce<Record<string, number>>((acc, d) => {
-    acc[d.region] = (acc[d.region] || 0) + d.total_volume;
-    return acc;
-  }, {});
-
-  const pieData = Object.entries(regionTotals).map(([name, value]) => ({
-    name,
-    value: Math.round(value),
+  const pieData = data.map((d) => ({
+    name: d.exchange,
+    value: Math.round(d.total_volume),
   }));
 
   return (
     <div className="card">
-      <h3>💹 Trade Volume by Region (Last 5 min)</h3>
+      <h3>💹 Trade Volume by Exchange (Last 5 min)</h3>
       <div className="volume-grid">
         <div className="volume-table">
           <table>
             <thead>
               <tr>
-                <th>Region</th>
-                <th>Asset Class</th>
-                <th>Trades</th>
+                <th>Exchange</th>
+                <th>Candles</th>
                 <th>Volume ($)</th>
               </tr>
             </thead>
             <tbody>
               {data.map((d, i) => (
                 <tr key={i}>
-                  <td>{d.region}</td>
-                  <td>{d.asset_class}</td>
-                  <td>{d.trade_count.toLocaleString()}</td>
+                  <td>{d.exchange}</td>
+                  <td>{d.candle_count.toLocaleString()}</td>
                   <td>${d.total_volume.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
                 </tr>
               ))}
