@@ -1,10 +1,13 @@
 """Load API credentials from .env file."""
 
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-# Load variables from .env file (located next to this file)
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+# Load variables from the project-root .env (the gitignored file that holds the
+# real keys). This file is <root>/src/config.py, so the repo root is one level up.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 def get_groww_credentials() -> dict:
