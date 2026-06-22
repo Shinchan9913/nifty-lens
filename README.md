@@ -81,7 +81,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
-pip install requests fastapi uvicorn
+pip install -r requirements.txt
 ```
 
 ### Infrastructure (Docker)
