@@ -184,8 +184,8 @@
 .md a { color: var(--text); text-decoration: underline; }
 
 /* ---------------- pixel office (canvas + DOM overlay) ---------------- */
-.px-office { position: relative; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #0c0c0e; }
-.px-canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; image-rendering: crisp-edges; filter: grayscale(1) contrast(1.04); }
+.px-office { position: relative; width: 100%; max-width: calc(64vh * 340 / 220); margin: 0 auto; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #0c0c0e; }
+.px-canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; filter: contrast(1.05) saturate(1.05); }
 .px-overlay { position: absolute; inset: 0; pointer-events: none; }
 .px-tag { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
 .px-plate { position: absolute; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 2px; pointer-events: auto; cursor: pointer; white-space: nowrap; }
