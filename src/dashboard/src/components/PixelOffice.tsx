@@ -25,15 +25,30 @@ interface SpriteConfig {
   // top-down sheets have one walk row per direction
   rows: { down: number; up: number; left: number; right: number };
   frames: number; fps: number;
+  scale?: number; // on-canvas size = frameH * scale (default 1.2)
 }
+// Sprite sheets + background live in the Python backend at src/agents/sprites/
+// and are served by FastAPI at <API_BASE>/agents/sprites/<file>.
+// These ship with Ninja Adventure art (pixel-boy, CC0) — cute chibi characters
+// normalized to a 4-row (down/up/left/right) x 4-frame walk sheet of 16x16
+// cells. A missing/failed image silently falls back to the procedural figure.
+const SPRITE_BASE = "http://localhost:8000/agents/sprites";
+const BACKGROUND_SRC = `${SPRITE_BASE}/background.png`;
+const WALK: Omit<SpriteConfig, "src"> = {
+  frameW: 16, frameH: 16,
+  rows: { down: 0, up: 1, left: 2, right: 3 },
+  frames: 4, fps: 7, scale: 1.25,
+};
 const SPRITES: Record<AgentId, SpriteConfig | null> = {
-  strategist: null, technical: null, risk: null, research: null,
-  // Example: strategist: { src:"/sprites/strategist.png", frameW:32, frameH:32,
-  //   rows:{down:0,up:1,left:2,right:3}, frames:4, fps:8 },
+  strategist: { src: `${SPRITE_BASE}/strategist.png`, ...WALK },
+  technical:  { src: `${SPRITE_BASE}/technical.png`,  ...WALK },
+  risk:       { src: `${SPRITE_BASE}/risk.png`,        ...WALK },
+  research:   { src: `${SPRITE_BASE}/research.png`,    ...WALK },
 };
 
 const W = 340;
 const H = 220;
+const DPR = 2; // canvas backing-store scale — render at 2x then let CSS downscale for crispness
 
 interface Zone { x: number; y: number; }
 const AGENTS: { id: AgentId; name: string; emoji: string; shade: string; desk: Zone; chair: Zone }[] = [
@@ -63,6 +78,7 @@ export default function PixelOffice({
   const statusRef = useRef(statuses);
   statusRef.current = statuses;
   const images = useRef<Record<string, HTMLImageElement | null>>({});
+  const bgImg = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
     for (const a of AGENTS) {
@@ -71,6 +87,9 @@ export default function PixelOffice({
       img.onload = () => { images.current[a.id] = img; };
       img.onerror = () => { images.current[a.id] = null; };
     }
+    const bg = new Image(); bg.src = BACKGROUND_SRC;
+    bg.onload = () => { bgImg.current = bg; };
+    bg.onerror = () => { bgImg.current = null; };
   }, []);
 
   useEffect(() => { if (lastMsg) couriers.current.push({ from: lastMsg.from, to: lastMsg.to, t: 0 }); }, [lastMsg]);
@@ -78,7 +97,27 @@ export default function PixelOffice({
   useEffect(() => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
-    ctx.imageSmoothingEnabled = false;
+    const host = (canvas.parentElement as HTMLElement) || canvas;
+
+    // Size the canvas to its box in JS so the room ALWAYS fits exactly — no CSS
+    // width quirks, no overflow. `scale` maps logical W×H units onto the backing.
+    let scale = DPR;
+    let lastCw = -1;
+    const measure = () => {
+      const cw = Math.max(1, host.clientWidth || W);
+      if (cw === lastCw) return; // guard against height-feedback resize loops
+      lastCw = cw;
+      const ch = (cw * H) / W;
+      canvas.style.width = `${cw}px`;
+      canvas.style.height = `${ch}px`;
+      canvas.width = Math.round(cw * DPR);
+      canvas.height = Math.round(ch * DPR);
+      scale = (cw * DPR) / W;
+      ctx.imageSmoothingEnabled = false; // resizing the canvas resets context state
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
     let raf = 0; let prev = performance.now();
 
     const target = (id: AgentId): Zone => {
@@ -91,15 +130,23 @@ export default function PixelOffice({
 
     const draw = (now: number) => {
       const dt = Math.min(0.05, (now - prev) / 1000); prev = now;
+      ctx.setTransform(scale, 0, 0, scale, 0, 0); // logical units → backing pixels
 
       // ---- room (top-down) ----
-      ctx.fillStyle = "#0c0c0e"; ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = "#17171a"; ctx.fillRect(8, 8, W - 16, H - 16);            // floor
-      ctx.fillStyle = "#0c0c0e"; ctx.fillRect(8, 8, W - 16, 6);                 // top wall shadow
-      // floor tiles
-      ctx.fillStyle = "#ffffff06";
-      for (let x = 8; x < W - 8; x += 22) ctx.fillRect(x, 8, 1, H - 16);
-      for (let y = 8; y < H - 8; y += 22) ctx.fillRect(8, y, W - 16, 1);
+      if (bgImg.current) {
+        // imported floor texture fills the room; a thin frame keeps the wall edge
+        ctx.fillStyle = "#0c0c0e"; ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(bgImg.current, 8, 8, W - 16, H - 16);
+        ctx.fillStyle = "#0c0c0e"; ctx.fillRect(8, 8, W - 16, 6);               // top wall shadow
+      } else {
+        ctx.fillStyle = "#0c0c0e"; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = "#17171a"; ctx.fillRect(8, 8, W - 16, H - 16);          // floor
+        ctx.fillStyle = "#0c0c0e"; ctx.fillRect(8, 8, W - 16, 6);              // top wall shadow
+        // floor tiles
+        ctx.fillStyle = "#ffffff06";
+        for (let x = 8; x < W - 8; x += 22) ctx.fillRect(x, 8, 1, H - 16);
+        for (let y = 8; y < H - 8; y += 22) ctx.fillRect(8, y, W - 16, 1);
+      }
 
       // rugs / zones
       drawRug(ctx, SOFA.x - 4, SOFA.y - 2, 60, 46, "breakroom");
@@ -145,12 +192,12 @@ export default function PixelOffice({
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
 
   return (
     <div className="px-office">
-      <canvas ref={canvasRef} width={W} height={H} className="px-canvas" />
+      <canvas ref={canvasRef} className="px-canvas" />
       <div className="px-overlay">
         <div className="px-tag">Market Analysis Floor</div>
         {AGENTS.map((a) => (
@@ -173,7 +220,8 @@ function drawChar(ctx: CanvasRenderingContext2D, c: CharState, shade: string, id
   if (cfg && img) {
     const row = cfg.rows[c.dir];
     const frame = moving ? Math.floor(c.t * cfg.fps) % cfg.frames : 0;
-    const sc = 1.2, dw = cfg.frameW * sc, dh = cfg.frameH * sc;
+    const sc = cfg.scale ?? 1.2, dw = cfg.frameW * sc, dh = cfg.frameH * sc;
+    ctx.fillStyle = "#00000055"; ctx.fillRect(x - 5, y + 1, 10, 3); // ground shadow
     ctx.drawImage(img, frame * cfg.frameW, row * cfg.frameH, cfg.frameW, cfg.frameH, x - dw / 2, y - dh + 4, dw, dh);
     return;
   }

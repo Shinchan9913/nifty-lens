@@ -1,0 +1,6 @@
+ddgs
+fastapi
+openai
+python-dotenv
+requests
+uvicorn

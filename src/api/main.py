@@ -9,12 +9,14 @@ Endpoints:
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 import requests
 
 from src.agents.bus import EventBus
@@ -32,6 +34,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve agent sprite sheets (PNGs in src/agents/sprites/) to the dashboard at
+# /agents/sprites/<file>. Drop the per-agent walk sheets there; PixelOffice loads them.
+SPRITES_DIR = os.path.join(os.path.dirname(__file__), "..", "agents", "sprites")
+os.makedirs(SPRITES_DIR, exist_ok=True)
+app.mount("/agents/sprites", StaticFiles(directory=SPRITES_DIR), name="agent-sprites")
 
 CLICKHOUSE_URL = "http://localhost:8123"
 
