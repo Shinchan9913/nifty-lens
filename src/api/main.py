@@ -179,7 +179,10 @@ def agents_meta():
 
 
 @app.get("/api/agents/stream")
-async def agents_stream(query: str = Query(..., description="The market question to analyze")):
+async def agents_stream(
+    query: str = Query(..., description="The market question to analyze"),
+    depth: str = Query("balanced", description="Analysis depth: quick | balanced | deep"),
+):
     """Run one multi-agent analysis and stream every step to the browser as SSE.
 
     Flow: make a per-run EventBus -> kick off run_analysis() as a background task
@@ -190,8 +193,8 @@ async def agents_stream(query: str = Query(..., description="The market question
 
     async def runner():
         try:
-            await bus.emit("run_started", query=query)
-            await run_analysis(query, bus)
+            await bus.emit("run_started", query=query, depth=depth)
+            await run_analysis(query, bus, depth=depth)
         except Exception as exc:  # never let a crash hang the open connection
             logger.exception("Agent run failed")
             await bus.emit("error", message=str(exc))

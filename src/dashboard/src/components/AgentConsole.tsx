@@ -16,10 +16,10 @@ type AgentId = "strategist" | "technical" | "risk" | "research";
 interface AgentMeta { id: AgentId; name: string; emoji: string; role: string; x: number; y: number; }
 
 const AGENTS: AgentMeta[] = [
-  { id: "strategist", name: "Strategist", emoji: "🧭", role: "Lead · coordinates the desk", x: 50, y: 18 },
-  { id: "technical", name: "Technical", emoji: "📈", role: "Price · momentum · volume", x: 16, y: 70 },
-  { id: "risk", name: "Risk", emoji: "🛡️", role: "Downside · risk ratings", x: 50, y: 82 },
-  { id: "research", name: "Research", emoji: "🌐", role: "News · web sentiment", x: 84, y: 70 },
+  { id: "strategist", name: "Strategist", emoji: "", role: "Lead · coordinates the desk", x: 50, y: 18 },
+  { id: "technical", name: "Technical", emoji: "", role: "Price · momentum · volume", x: 16, y: 70 },
+  { id: "risk", name: "Risk", emoji: "", role: "Downside · risk ratings", x: 50, y: 82 },
+  { id: "research", name: "Research", emoji: "", role: "News · web sentiment", x: 84, y: 70 },
 ];
 const AGENT_BY_ID = Object.fromEntries(AGENTS.map((a) => [a.id, a])) as Record<AgentId, AgentMeta>;
 
@@ -72,6 +72,7 @@ function Markdown({ text }: { text: string }) {
 
 export default function AgentConsole() {
   const [query, setQuery] = useState(EXAMPLES[0]);
+  const [depth, setDepth] = useState<"quick" | "balanced" | "deep">("balanced");
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<Record<string, Status>>({});
   const [thinking, setThinking] = useState<Record<string, string>>({});
@@ -129,7 +130,7 @@ export default function AgentConsole() {
     setStatus({}); setThinking({}); setOutput({}); setTimeline([]);
     setReport(""); setError(""); setBubbles({}); setLastMsg(null); setModal(null);
 
-    const es = new EventSource(`${API_BASE}/api/agents/stream?query=${encodeURIComponent(query)}`);
+    const es = new EventSource(`${API_BASE}/api/agents/stream?query=${encodeURIComponent(query)}&depth=${depth}`);
     esRef.current = es;
     es.onmessage = (e) => {
       const ev = JSON.parse(e.data);
@@ -169,6 +170,11 @@ export default function AgentConsole() {
         <input className="inp" value={query} disabled={running}
           onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && run()}
           placeholder="Ask the desk about the market…" />
+        <div className="depth-seg" title="How much the desk digs in (caps each analyst's tool rounds)">
+          {(["quick", "balanced", "deep"] as const).map((d) => (
+            <button key={d} className={depth === d ? "active" : ""} disabled={running} onClick={() => setDepth(d)}>{d}</button>
+          ))}
+        </div>
         <button className="run" onClick={run} disabled={running}>{running ? "Working…" : "Run analysis"}</button>
       </div>
       <div className="chips">{EXAMPLES.map((ex) => <button key={ex} className="chip" disabled={running} onClick={() => !running && setQuery(ex)}>{ex}</button>)}</div>
@@ -234,7 +240,7 @@ export default function AgentConsole() {
       {/* ---------- briefing (short, expandable) ---------- */}
       {report && (
         <div className="brief">
-          <div className="brief-head"><span>🧭 Strategist's briefing</span>
+          <div className="brief-head"><span>Strategist's briefing</span>
             <button className="link-btn" onClick={() => setModal({ kind: "briefing" })}>Read full →</button>
           </div>
           <p className="brief-short">{briefShort}</p>
@@ -250,9 +256,9 @@ export default function AgentConsole() {
             const a = AGENT_BY_ID[it.agent];
             if (it.kind === "message") {
               const to = it.to ? AGENT_BY_ID[it.to] : undefined;
-              return <div className="tk-row" key={i}><span className="tk-who">{a?.emoji} {a?.name}</span><span className="arr">→</span><span className="tk-who">{to?.emoji} {to?.name}</span><span className="tk-msg">{it.label.slice(0, 70)}</span></div>;
+              return <div className="tk-row" key={i}><span className="tk-who">{a?.name}</span><span className="arr">→</span><span className="tk-who">{to?.emoji} {to?.name}</span><span className="tk-msg">{it.label.slice(0, 70)}</span></div>;
             }
-            return <div className="tk-row" key={i}><span className="tk-who">{a?.emoji} {a?.name}</span><span className="tk-verb">{it.kind === "tool_call" ? "calls" : "got"}</span><code className={it.ok === false ? "err" : ""}>{it.label.slice(0, 64)}</code></div>;
+            return <div className="tk-row" key={i}><span className="tk-who">{a?.name}</span><span className="tk-verb">{it.kind === "tool_call" ? "calls" : "got"}</span><code className={it.ok === false ? "err" : ""}>{it.label.slice(0, 64)}</code></div>;
           })}
         </div>
       </div>
@@ -263,7 +269,7 @@ export default function AgentConsole() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <button className="modal-x" onClick={() => setModal(null)}>✕</button>
             {modal.kind === "briefing" ? (
-              <><div className="modal-title">🧭 Strategist's Briefing</div><div className="modal-body"><Markdown text={report} /></div></>
+              <><div className="modal-title">Strategist's Briefing</div><div className="modal-body"><Markdown text={report} /></div></>
             ) : (
               <AgentModal id={modal.id} status={status[modal.id] || "idle"} thinking={thinking[modal.id] || ""} output={output[modal.id] || ""}
                 tools={timeline.filter((t) => t.agent === modal.id && t.kind !== "message")} />
@@ -279,7 +285,7 @@ function AgentModal({ id, status, thinking, output, tools }: { id: AgentId; stat
   const a = AGENT_BY_ID[id];
   return (
     <>
-      <div className="modal-title">{a.emoji} {a.name} <span className="modal-role">{a.role}</span> <span className={`pl-stat s-${status}`}>{status}</span></div>
+      <div className="modal-title">{a.name} <span className="modal-role">{a.role}</span> <span className={`pl-stat s-${status}`}>{status}</span></div>
       <div className="modal-body">
         {thinking && (<><div className="ml">Reasoning</div><pre className="reason">{thinking}</pre></>)}
         <div className="ml">Findings</div>
