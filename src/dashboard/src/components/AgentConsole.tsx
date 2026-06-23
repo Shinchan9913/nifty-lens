@@ -31,7 +31,7 @@ const EXAMPLES = [
 
 type Status = "idle" | "working" | "thinking" | "done";
 
-interface TimelineItem { kind: "message" | "tool_call" | "tool_result"; agent: AgentId; to?: AgentId; label: string; ok?: boolean; }
+interface TimelineItem { kind: "message" | "tool_call" | "tool_result"; agent: AgentId; to?: AgentId; label: string; ok?: boolean; tool?: string; input?: unknown; data?: unknown; }
 interface Mover { symbol: string; change_pct: number; range_pct: number; close: number; }
 
 // ---------- minimal markdown ----------
@@ -83,6 +83,7 @@ export default function AgentConsole() {
   const [bubbles, setBubbles] = useState<Record<string, string>>({});
   const [lastMsg, setLastMsg] = useState<{ from: AgentId; to: AgentId; seq: number } | null>(null);
   const [modal, setModal] = useState<{ kind: "agent"; id: AgentId } | { kind: "briefing" } | null>(null);
+  const [verdicts, setVerdicts] = useState<{ claim: string; verdict: "confirmed" | "uncertain" | "refuted"; reason: string }[]>([]);
 
   // live market data for the charts
   const [movers, setMovers] = useState<Mover[]>([]);
@@ -128,7 +129,7 @@ export default function AgentConsole() {
     if (running || !query.trim()) return;
     setRunning(true);
     setStatus({}); setThinking({}); setOutput({}); setTimeline([]);
-    setReport(""); setError(""); setBubbles({}); setLastMsg(null); setModal(null);
+    setReport(""); setError(""); setBubbles({}); setLastMsg(null); setModal(null); setVerdicts([]);
 
     const es = new EventSource(`${API_BASE}/api/agents/stream?query=${encodeURIComponent(query)}&depth=${depth}`);
     esRef.current = es;
@@ -147,8 +148,9 @@ export default function AgentConsole() {
           setTimeline((tl) => [...tl, { kind: "tool_call", agent: ev.agent, label: `${ev.tool}(${fmtInput(ev.input)})` }]);
           break;
         case "tool_result":
-          setTimeline((tl) => [...tl, { kind: "tool_result", agent: ev.agent, label: `${ev.tool} → ${ev.summary}`, ok: ev.ok }]);
+          setTimeline((tl) => [...tl, { kind: "tool_result", agent: ev.agent, label: `${ev.tool} → ${ev.summary}`, ok: ev.ok, tool: ev.tool, input: ev.input, data: ev.data }]);
           break;
+        case "finding_verified": setVerdicts((v) => [...v, { claim: ev.claim, verdict: ev.verdict, reason: ev.reason }]); break;
         case "final_report": setReport(ev.content); break;
         case "error": setError(ev.message); break;
         case "run_finished": es.close(); setRunning(false); break;
@@ -237,6 +239,27 @@ export default function AgentConsole() {
         </div>
       </div>
 
+      {/* ---------- verification ---------- */}
+      {verdicts.length > 0 && (
+        <div className="verify">
+          <div className="verify-head">
+            <span>Verification</span>
+            <span className="verify-sub">
+              {verdicts.filter((v) => v.verdict === "confirmed").length} confirmed ·{" "}
+              {verdicts.filter((v) => v.verdict === "uncertain").length} uncertain ·{" "}
+              {verdicts.filter((v) => v.verdict === "refuted").length} refuted
+            </span>
+          </div>
+          {verdicts.map((v, i) => (
+            <div key={i} className={`vrow v-${v.verdict}`}>
+              <span className="vbadge">{v.verdict}</span>
+              <span className="vclaim">{v.claim}</span>
+              {v.reason && <span className="vreason">{v.reason}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ---------- briefing (short, expandable) ---------- */}
       {report && (
         <div className="brief">
@@ -272,7 +295,7 @@ export default function AgentConsole() {
               <><div className="modal-title">Strategist's Briefing</div><div className="modal-body"><Markdown text={report} /></div></>
             ) : (
               <AgentModal id={modal.id} status={status[modal.id] || "idle"} thinking={thinking[modal.id] || ""} output={output[modal.id] || ""}
-                tools={timeline.filter((t) => t.agent === modal.id && t.kind !== "message")} />
+                evidence={timeline.filter((t) => t.agent === modal.id && t.kind === "tool_result")} />
             )}
           </div>
         </div>
@@ -281,7 +304,7 @@ export default function AgentConsole() {
   );
 }
 
-function AgentModal({ id, status, thinking, output, tools }: { id: AgentId; status: Status; thinking: string; output: string; tools: TimelineItem[]; }) {
+function AgentModal({ id, status, thinking, output, evidence }: { id: AgentId; status: Status; thinking: string; output: string; evidence: TimelineItem[]; }) {
   const a = AGENT_BY_ID[id];
   return (
     <>
@@ -290,7 +313,17 @@ function AgentModal({ id, status, thinking, output, tools }: { id: AgentId; stat
         {thinking && (<><div className="ml">Reasoning</div><pre className="reason">{thinking}</pre></>)}
         <div className="ml">Findings</div>
         {output ? <Markdown text={output} /> : <span className="muted">No findings yet — this analyst hasn't reported.</span>}
-        {tools.length > 0 && (<><div className="ml">Actions</div>{tools.map((t, i) => <div key={i} className={`tool-row ${t.ok === false ? "err" : ""}`}><code>{t.label}</code></div>)}</>)}
+        {evidence.length > 0 && (
+          <>
+            <div className="ml">Evidence ({evidence.length} tool {evidence.length === 1 ? "call" : "calls"}) — the data behind the findings</div>
+            {evidence.map((e, i) => (
+              <details key={i} className={`evi ${e.ok === false ? "err" : ""}`}>
+                <summary><code>{e.tool}({fmtInput(e.input)})</code> <span className="evi-sum">{e.ok === false ? "failed" : "→ " + e.label.split(" → ")[1]}</span></summary>
+                <pre className="evi-data">{e.ok === false ? "(no data — see summary)" : JSON.stringify(e.data, null, 2)}</pre>
+              </details>
+            ))}
+          </>
+        )}
       </div>
     </>
   );

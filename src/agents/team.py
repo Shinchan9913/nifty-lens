@@ -93,6 +93,27 @@ STRATEGIST = Agent(
     ),
 )
 
+VERIFIER = Agent(
+    agent_id="verifier",
+    name="Verifier",
+    emoji="",
+    color="#eab308",
+    model=DEFAULT_MODEL,  # adversarial audit -> smart model
+    role="Audits each claim against the evidence",
+    max_tokens=2000,
+    system=(
+        "You are the Verifier: an adversarial fact-checker on a market desk. You are given the "
+        "specialists' findings and the EVIDENCE (the exact tool calls + data they pulled). "
+        "Extract the concrete, checkable claims and rate each strictly against the evidence.\n\n"
+        "Respond with ONLY a JSON array (no prose, no code fences) of objects: "
+        '{"claim": "<short claim>", "verdict": "confirmed" | "uncertain" | "refuted", '
+        '"reason": "<one line citing the data>"}.\n'
+        "confirmed = evidence directly supports it; refuted = evidence contradicts it; "
+        "uncertain = evidence is missing or insufficient. Default to 'uncertain' when unsure. "
+        "Be skeptical. 4-8 claims maximum."
+    ),
+)
+
 SPECIALISTS = {a.id: a for a in (TECHNICAL, RISK, RESEARCH)}
 
 CONSULT_TOOL = {

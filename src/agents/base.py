@@ -62,6 +62,7 @@ class Agent:
         extra_handlers: dict | None = None,
         max_rounds: int | None = None,
         model: str | None = None,
+        ledger: list | None = None,
     ) -> str:
         """Run the agent to completion and return its final text answer.
 
@@ -148,13 +149,13 @@ class Agent:
             if not calls:
                 break
 
-            results = await asyncio.gather(*[self._run_tool(bus, handlers, c) for c in calls])
+            results = await asyncio.gather(*[self._run_tool(bus, handlers, c, ledger) for c in calls])
             messages.extend(results)
 
         await bus.emit("agent_status", agent=self.id, status="done")
         return last_text
 
-    async def _run_tool(self, bus: EventBus, handlers: dict, call: dict) -> dict:
+    async def _run_tool(self, bus: EventBus, handlers: dict, call: dict, ledger: list | None = None) -> dict:
         name = call["name"]
         try:
             args = json.loads(call["args"] or "{}")
@@ -168,7 +169,14 @@ class Agent:
             return {"role": "tool", "tool_call_id": call["id"], "content": f"Unknown tool {name}"}
         try:
             result = await handler(**args)
-            await bus.emit("tool_result", agent=self.id, tool=name, ok=True, summary=summarize_result(result))
+            # carry the actual returned data (capped) as evidence for the UI drawer
+            evidence = result[:25] if isinstance(result, list) else result
+            await bus.emit(
+                "tool_result", agent=self.id, tool=name, ok=True,
+                summary=summarize_result(result), input=args, data=evidence,
+            )
+            if ledger is not None:
+                ledger.append({"agent": self.id, "tool": name, "input": args, "summary": summarize_result(result), "data": evidence})
             return {"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, default=str)}
         except Exception as exc:  # surface failures to both the model and the UI
             await bus.emit("tool_result", agent=self.id, tool=name, ok=False, summary=str(exc))

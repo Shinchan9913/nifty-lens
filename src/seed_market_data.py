@@ -21,15 +21,17 @@ IST = timezone(timedelta(hours=5, minutes=30))
 BARS_PER_SYMBOL = 45
 
 # Yahoo ticker -> (our symbol, exchange). Add/remove freely.
+# US-led universe (matches daily_bars/seed_history) + a few NSE names.
 TICKERS = {
+    # US (primary)
+    "AAPL": ("AAPL", "US"), "MSFT": ("MSFT", "US"), "NVDA": ("NVDA", "US"),
+    "AMZN": ("AMZN", "US"), "GOOGL": ("GOOGL", "US"), "META": ("META", "US"),
+    "TSLA": ("TSLA", "US"), "JPM": ("JPM", "US"), "XOM": ("XOM", "US"), "JNJ": ("JNJ", "US"),
+    # NSE (home market)
     "RELIANCE.NS": ("RELIANCE", "NSE"),
     "TCS.NS": ("TCS", "NSE"),
     "HDFCBANK.NS": ("HDFCBANK", "NSE"),
     "INFY.NS": ("INFY", "NSE"),
-    "ICICIBANK.NS": ("ICICIBANK", "NSE"),
-    "SBIN.NS": ("SBIN", "NSE"),
-    "TATASTEEL.NS": ("TATASTEEL", "NSE"),
-    "BAJFINANCE.NS": ("BAJFINANCE", "NSE"),
     "^NSEI": ("NIFTY", "NSE"),
 }
 

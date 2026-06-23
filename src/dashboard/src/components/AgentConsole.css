@@ -152,6 +152,19 @@
 .brief-short { color: var(--dim); font-size: 0.9rem; line-height: 1.55; }
 .link-btn { background: none; border: none; color: var(--text); font-size: 0.8rem; cursor: pointer; text-decoration: underline; }
 
+/* ---------------- verification ---------------- */
+.verify { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+.verify-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.92rem; margin-bottom: 8px; }
+.verify-sub { font-size: 0.72rem; color: var(--muted); font-weight: 400; }
+.vrow { display: flex; align-items: baseline; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 0.84rem; flex-wrap: wrap; }
+.vbadge { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; font-weight: 700; white-space: nowrap; }
+.v-confirmed .vbadge { background: #14331e; color: #22c55e; }
+.v-uncertain .vbadge { background: #332f22; color: #d4b15a; }
+.v-refuted .vbadge { background: #331719; color: #ef4444; }
+.vclaim { color: var(--dim); flex: 1; min-width: 220px; }
+.v-refuted .vclaim { text-decoration: line-through; color: var(--muted); }
+.vreason { color: var(--muted); font-size: 0.76rem; width: 100%; }
+
 /* ---------------- ticker ---------------- */
 .ticker { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
 .tk-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 10px; }
@@ -176,6 +189,15 @@
 .tool-row { font-size: 0.8rem; padding: 4px 0; }
 .tool-row code { background: var(--panel2); border: 1px solid var(--line); padding: 2px 7px; border-radius: 5px; color: var(--dim); }
 .tool-row.err code { color: #fca5a5; }
+
+/* evidence drawer (provenance) */
+.evi { border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; overflow: hidden; }
+.evi summary { cursor: pointer; padding: 7px 10px; font-size: 0.8rem; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.evi summary::-webkit-details-marker { display: none; }
+.evi summary code { background: var(--panel2); border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; color: var(--dim); }
+.evi-sum { color: var(--muted); font-size: 0.75rem; }
+.evi-data { margin: 0; padding: 10px; background: #08080a; border-top: 1px solid var(--line); font-size: 0.72rem; line-height: 1.4; color: #b4b4bb; max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.evi.err summary code { color: #fca5a5; }
 
 /* markdown */
 .md h3 { font-size: 1.05rem; margin: 14px 0 8px; }
