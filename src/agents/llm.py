@@ -29,7 +29,11 @@ import os
 from openai import AsyncOpenAI
 
 DEFAULT_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+# "smart" model — used for the Strategist's synthesis (quality matters, one call).
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+# "fast" model — used for the specialists (call tools + report; cheap cognition, many calls).
+# On NVIDIA the 70B is ~18x slower than the 8B, so the split is the main latency lever.
+FAST_MODEL = os.getenv("LLM_MODEL_FAST", "meta/llama-3.1-8b-instruct")
 API_KEY = os.getenv("LLM_API_KEY", "")
 
 

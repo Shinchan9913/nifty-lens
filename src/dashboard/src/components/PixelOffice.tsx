@@ -37,10 +37,10 @@ const H = 220;
 
 interface Zone { x: number; y: number; }
 const AGENTS: { id: AgentId; name: string; emoji: string; shade: string; desk: Zone; chair: Zone }[] = [
-  { id: "strategist", name: "Strategist", emoji: "🧭", shade: "#fafafa", desk: { x: 170, y: 40 }, chair: { x: 170, y: 64 } },
-  { id: "technical", name: "Technical", emoji: "📈", shade: "#d4d4d8", desk: { x: 70, y: 120 }, chair: { x: 70, y: 144 } },
-  { id: "risk", name: "Risk", emoji: "🛡️", shade: "#a1a1aa", desk: { x: 270, y: 120 }, chair: { x: 270, y: 144 } },
-  { id: "research", name: "Research", emoji: "🌐", shade: "#8a8a93", desk: { x: 170, y: 178 }, chair: { x: 170, y: 200 } },
+  { id: "strategist", name: "Strategist", emoji: "", shade: "#fafafa", desk: { x: 170, y: 40 }, chair: { x: 170, y: 64 } },
+  { id: "technical", name: "Technical", emoji: "", shade: "#d4d4d8", desk: { x: 70, y: 120 }, chair: { x: 70, y: 144 } },
+  { id: "risk", name: "Risk", emoji: "", shade: "#a1a1aa", desk: { x: 270, y: 120 }, chair: { x: 270, y: 144 } },
+  { id: "research", name: "Research", emoji: "", shade: "#8a8a93", desk: { x: 170, y: 178 }, chair: { x: 170, y: 200 } },
 ];
 const SOFA: Zone = { x: 40, y: 50 };
 const BUG: Zone = { x: 300, y: 188 };
@@ -157,7 +157,7 @@ export default function PixelOffice({
           <div key={a.id} className="px-plate" style={{ left: `${(a.desk.x / W) * 100}%`, top: `${(a.desk.y / H) * 100 - 13}%` }}
             onClick={() => onSelect(a.id)} title="Click for full transcript">
             {speech[a.id] && <div className="px-speech">{speech[a.id]}…</div>}
-            <span className="px-name">{a.emoji} {a.name}</span>
+            <span className="px-name">{a.name}</span>
             <span className={`px-status s-${statuses[a.id] || "idle"}`}>{statuses[a.id] || "idle"}</span>
           </div>
         ))}

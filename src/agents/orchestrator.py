@@ -1,43 +1,65 @@
-"""Runs one market-analysis session: the Strategist coordinates the specialists.
+"""Runs one market-analysis session.
 
-The trick that makes "agents talk to each other" real: the Strategist is given a
-``consult_specialist`` tool whose *handler* is a closure defined here. When the
-Strategist calls it, we (1) emit a strategist -> specialist message, (2) actually
-run that specialist agent (which streams its own thinking/tools), and (3) emit the
-specialist -> strategist reply. To the Strategist it looks like a normal tool; to
-the UI it looks like a conversation between agents.
+Parallel-from-our-side orchestration: instead of letting the model pick specialists
+one at a time (sequential, and dependent on fragile parallel model tool-calls), WE
+run all specialists concurrently with asyncio.gather, then the Strategist synthesizes
+their gathered findings into the briefing. Deterministic, ~3x faster wall-clock.
+
+The `depth` control is a full EFFORT PROFILE — it tunes three things together:
+  - rounds: how many tool-loop rounds each specialist may take
+  - model:  fast (8B) vs smart (70B) — the dominant latency lever
+  - note:   a prompt directive (terse + few tools  ...  thorough + many tools)
 """
+import asyncio
+
 from .bus import EventBus
-from .llm import API_KEY, get_client
-from .team import CONSULT_TOOL, SPECIALISTS, STRATEGIST
+from .llm import API_KEY, DEFAULT_MODEL, FAST_MODEL, get_client
+from .team import SPECIALISTS, STRATEGIST
+
+# force_model: override every agent's model. None = use each agent's own default
+# (Technical/Research = fast 8B, Risk/Strategist = smart 70B) — the per-role combination.
+DEPTH_PROFILES = {
+    "quick": {
+        "rounds": 2, "force_model": FAST_MODEL,
+        "note": "QUICK mode: be fast and decisive. Use only the 1-2 most relevant tools. "
+                "At most 3 short findings.",
+    },
+    "balanced": {
+        "rounds": 3, "force_model": None,  # per-role mix: smart where judgment matters, fast elsewhere
+        "note": "BALANCED mode: check the key tools for your mandate. At most 5 findings.",
+    },
+    "deep": {
+        "rounds": 5, "force_model": DEFAULT_MODEL,  # max quality: smart model everywhere
+        "note": "DEEP mode: be thorough. Consult all relevant tools — including fundamentals, "
+                "filings, options and the macro regime. Up to 8 findings with supporting detail.",
+    },
+}
 
 
-async def run_analysis(question: str, bus: EventBus) -> None:
+async def run_analysis(question: str, bus: EventBus, depth: str = "balanced") -> None:
     if not API_KEY:
-        await bus.emit(
-            "error",
-            message="LLM_API_KEY is not set. Add LLM_API_KEY / LLM_BASE_URL / LLM_MODEL to the root .env and restart the API.",
-        )
+        await bus.emit("error", message="LLM_API_KEY is not set. Add LLM_* to the root .env and restart the API.")
         return
 
+    p = DEPTH_PROFILES.get(depth, DEPTH_PROFILES["balanced"])
     client = get_client()
 
-    async def consult_specialist(specialist: str, question: str) -> str:
-        agent = SPECIALISTS.get(specialist)
-        if agent is None:
-            return f"No such specialist: {specialist}"
-        # strategist -> specialist (the delegation)
-        await bus.emit("agent_message", **{"from": "strategist", "to": specialist, "content": question})
-        answer = await agent.run(client, bus, question)
-        # specialist -> strategist (the findings come back)
-        await bus.emit("agent_message", **{"from": specialist, "to": "strategist", "content": answer})
-        return answer
+    async def consult(agent) -> tuple[str, str]:
+        await bus.emit("agent_message", **{"from": "strategist", "to": agent.id, "content": question})
+        task = f"{p['note']}\n\nQuestion: {question}"
+        # model=None -> agent uses its own role-default
+        answer = await agent.run(client, bus, task, max_rounds=p["rounds"], model=p["force_model"])
+        await bus.emit("agent_message", **{"from": agent.id, "to": "strategist", "content": answer})
+        return agent.id, answer
 
-    final = await STRATEGIST.run(
-        client,
-        bus,
-        question,
-        extra_tools=[CONSULT_TOOL],
-        extra_handlers={"consult_specialist": consult_specialist},
+    # fan out: all specialists work in parallel
+    results = await asyncio.gather(*[consult(a) for a in SPECIALISTS.values()])
+
+    # synthesize: hand the gathered findings to the Strategist
+    findings = "\n\n".join(f"## {SPECIALISTS[aid].name} findings\n{ans}" for aid, ans in results)
+    synthesis_task = (
+        f"User question: {question}\n\n{p['note']}\n\n"
+        f"Your specialists have reported. Synthesize their findings into the briefing.\n\n{findings}"
     )
+    final = await STRATEGIST.run(client, bus, synthesis_task, max_rounds=2, model=p["force_model"])
     await bus.emit("final_report", content=final)

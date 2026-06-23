@@ -44,7 +44,7 @@ export default function VolumeChart() {
 
   return (
     <div className="card">
-      <h3>💹 Trade Volume by Exchange (Last 5 min)</h3>
+      <h3>Trade Volume by Exchange (Last 5 min)</h3>
       <div className="volume-grid">
         <div className="volume-table">
           <table>

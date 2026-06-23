@@ -60,8 +60,15 @@ class Agent:
         task: str,
         extra_tools: list[dict] | None = None,
         extra_handlers: dict | None = None,
+        max_rounds: int | None = None,
+        model: str | None = None,
     ) -> str:
-        """Run the agent to completion and return its final text answer."""
+        """Run the agent to completion and return its final text answer.
+
+        max_rounds and model override the agent defaults for this run — the UI depth
+        control uses them (with a prompt directive) as one coherent effort profile.
+        """
+        run_model = model or self.model
         tools = self._tools(extra_tools)
         handlers = {n: HANDLERS[n] for n in self.tool_names}
         if extra_handlers:
@@ -74,13 +81,13 @@ class Agent:
         await bus.emit("agent_status", agent=self.id, status="working")
 
         last_text = ""
-        for _round in range(self.max_rounds):  # guard against runaway tool loops
+        for _round in range(max_rounds or self.max_rounds):  # guard against runaway tool loops
             await bus.emit("agent_status", agent=self.id, status="thinking")
             text_parts: list[str] = []
             calls_acc: dict[int, dict] = {}  # index -> {id, name, args}
 
             create_kwargs = dict(
-                model=self.model,
+                model=run_model,
                 messages=messages,
                 stream=True,
                 max_tokens=self.max_tokens,
@@ -124,7 +131,11 @@ class Agent:
             if turn_text:
                 last_text = turn_text
 
-            calls = [calls_acc[i] for i in sorted(calls_acc)]
+            # One tool call per turn: NVIDIA's prompt template rejects an assistant
+            # message carrying multiple tool_calls ("only supports single tool-calls
+            # at once"). If the model emitted several, keep the first; it can re-request
+            # the rest next round. Keeps history valid across providers.
+            calls = [calls_acc[i] for i in sorted(calls_acc)][:1]
 
             assistant_msg: dict = {"role": "assistant", "content": turn_text or None}
             if calls:

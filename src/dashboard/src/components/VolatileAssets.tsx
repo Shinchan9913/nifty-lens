@@ -49,7 +49,7 @@ export default function VolatileAssets() {
 
   return (
     <div className="card">
-      <h3>🔥 Top 10 Most Volatile Assets (Last 5 min)</h3>
+      <h3>Top 10 Most Volatile Assets (Last 5 min)</h3>
       <div className="volatile-grid">
         <div className="volatile-table">
           <table>
