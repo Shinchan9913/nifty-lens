@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from "react";
 import MarketDashboard from "./components/MarketDashboard";
 import AgentConsole from "./components/AgentConsole";
+import Dependencies from "./components/Dependencies";
 
-type Tab = "markets" | "floor";
+type Tab = "markets" | "floor" | "dependencies";
 
 const NAV: { id: Tab; label: string; icon: ReactNode }[] = [
   {
@@ -20,6 +21,16 @@ const NAV: { id: Tab; label: string; icon: ReactNode }[] = [
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
         <rect x="3" y="4" width="18" height="14" rx="2" /><path d="M3 10h18M8 18v3M16 18v3" />
+      </svg>
+    ),
+  },
+  {
+    id: "dependencies",
+    label: "Dependencies",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+        <circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="12" cy="18" r="2" />
+        <path d="M7 6h10M6 8l5 8M18 8l-5 8" />
       </svg>
     ),
   },
@@ -59,14 +70,14 @@ export default function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-tremor-border bg-parchment px-6">
           <h1 className="text-base font-semibold text-ink">
-            {tab === "markets" ? "Market Analytics" : "Trading Floor"}
+            {tab === "markets" ? "Market Analytics" : tab === "floor" ? "Trading Floor" : "NSE Dependency Graph"}
           </h1>
           <span className="flex items-center gap-2 text-xs text-ink/50">
             <span className="h-2 w-2 animate-pulse rounded-full bg-sage" /> live
           </span>
         </header>
         <main className="min-w-0 flex-1 overflow-y-auto p-6">
-          {tab === "markets" ? <MarketDashboard /> : <AgentConsole />}
+          {tab === "markets" ? <MarketDashboard /> : tab === "floor" ? <AgentConsole /> : <Dependencies />}
         </main>
       </div>
     </div>
