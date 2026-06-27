@@ -361,6 +361,131 @@ async def web_search(query: str, max_results: int = 5) -> list[dict]:
     return await asyncio.to_thread(_web_search_sync, query, int(max_results))
 
 
+# --- dependency graph (controlled forecasting pipeline) -----------------------
+async def _latest_dep_run() -> dict | None:
+    rows = await query("SELECT * FROM forecast_runs ORDER BY created_at DESC LIMIT 1")
+    return rows[0] if rows else None
+
+
+async def get_dependency_graph(limit: int = 20) -> dict:
+    """The latest validated dependency graph: directed lag-1 residual edges that
+    beat AR-only and factor-only baselines out of sample."""
+    run = await _latest_dep_run()
+    if not run:
+        return {"available": False, "note": "no dependency run yet (rebuild needed)"}
+    edges = await query(
+        f"SELECT src, dst, round(coef,4) AS coef, round(improve_ar,4) AS improve_ar, "
+        f"round(sign_consistency,3) AS sign_consistency, round(dir_acc_full,3) AS dir_acc_full "
+        f"FROM dependency_edges WHERE run_id='{run['run_id']}' ORDER BY improve_ar DESC LIMIT {int(limit)}"
+    )
+    return {
+        "available": True, "run_id": run["run_id"], "as_of": run["date_end"],
+        "n_obs": run["n_obs"], "n_candidates": run["n_candidates"], "n_edges": run["n_edges"],
+        "edges": edges,
+        "note": "src leads dst by 1 day in residual space. Sparse/empty is normal; not causal.",
+    }
+
+
+async def get_symbol_dependencies(symbol: str) -> dict:
+    """Upstream drivers and downstream dependents of one symbol, with its model quality."""
+    run = await _latest_dep_run()
+    if not run:
+        return {"available": False, "note": "no dependency run yet"}
+    sym = _safe_symbol(symbol)
+    rid = run["run_id"]
+    drivers = await query(
+        f"SELECT src AS driver, round(coef,4) AS coef, round(improve_ar,4) AS improve_ar "
+        f"FROM dependency_edges WHERE run_id='{rid}' AND dst='{sym}' ORDER BY improve_ar DESC"
+    )
+    dependents = await query(
+        f"SELECT dst AS dependent, round(coef,4) AS coef, round(improve_ar,4) AS improve_ar "
+        f"FROM dependency_edges WHERE run_id='{rid}' AND src='{sym}' ORDER BY improve_ar DESC"
+    )
+    m = await query(
+        f"SELECT round(mse_ar,8) AS mse_ar, round(mse_full,8) AS mse_full, "
+        f"round(dir_acc_full,3) AS dir_acc_full FROM forecast_metrics "
+        f"WHERE run_id='{rid}' AND scope='symbol' AND symbol='{sym}' LIMIT 1"
+    )
+    return {"available": True, "symbol": sym, "upstream_drivers": drivers,
+            "downstream_dependents": dependents, "metrics": m[0] if m else None}
+
+
+async def get_dependency_shock(symbol: str, shock_pct: float = 5.0, horizon: int = 5) -> dict:
+    """Propagate a one-off shock to a symbol through the learned graph (scenario only)."""
+    from src.forecast.propagate import build_matrix, simulate_shock
+
+    run = await _latest_dep_run()
+    if not run:
+        return {"available": False, "note": "no dependency run yet"}
+    sym = _safe_symbol(symbol)
+    rid = run["run_id"]
+    universe = run["universe"]
+    if sym not in universe:
+        return {"available": False, "note": f"{sym} not in dependency universe"}
+    edges = await query(f"SELECT src, dst, coef FROM dependency_edges WHERE run_id='{rid}'")
+    coefs = await query(
+        f"SELECT symbol, ar_coef, resid_std FROM forecast_metrics WHERE run_id='{rid}' AND scope='symbol'"
+    )
+    ar = {c["symbol"]: float(c["ar_coef"]) for c in coefs}
+    rsd = {c["symbol"]: float(c["resid_std"]) for c in coefs}
+
+    def _run():
+        M, radius, clamped = build_matrix(universe, edges, ar)
+        series = simulate_shock(universe, M, rsd, sym, float(shock_pct), int(horizon))
+        final = [r for r in series if r["step"] == int(horizon) and r["affected_symbol"] != sym]
+        return sorted(final, key=lambda r: abs(r["mean_impact"]), reverse=True)[:8], radius
+
+    movers, radius = await asyncio.to_thread(_run)
+    return {"available": True, "shocked_symbol": sym, "shock_pct": shock_pct,
+            "horizon": horizon, "spectral_radius": round(radius, 4), "top_movers": movers,
+            "note": "Probabilistic scenario, not causal/advice. prob_up~0.5 => little signal."}
+
+
+async def get_comovement_network(symbol: str = "", limit: int = 15) -> dict:
+    """Same-day co-movement structure (partial-correlation network). If a symbol is
+    given, returns its direct co-movement neighbours; else the strongest links overall."""
+    run = await _latest_dep_run()
+    if not run:
+        return {"available": False, "note": "no dependency run yet"}
+    rid = run["run_id"]
+    if symbol:
+        sym = _safe_symbol(symbol)
+        rows = await query(
+            f"SELECT a, b, round(partial_corr,4) AS partial_corr, round(corr,4) AS corr "
+            f"FROM comovement_edges WHERE run_id='{rid}' AND (a='{sym}' OR b='{sym}') "
+            f"ORDER BY abs(partial_corr) DESC LIMIT {int(limit)}"
+        )
+        neighbours = [{"peer": r["b"] if r["a"] == sym else r["a"],
+                       "partial_corr": r["partial_corr"], "corr": r["corr"],
+                       "relation": "moves together" if r["partial_corr"] >= 0 else "moves opposite (substitute)"}
+                      for r in rows]
+        return {"available": True, "symbol": sym, "neighbours": neighbours,
+                "note": "Same-day direct co-movement (factors + all other names removed). Not predictive, not causal."}
+    rows = await query(
+        f"SELECT a, b, round(partial_corr,4) AS partial_corr FROM comovement_edges "
+        f"WHERE run_id='{rid}' ORDER BY abs(partial_corr) DESC LIMIT {int(limit)}"
+    )
+    return {"available": True, "strongest_links": rows,
+            "note": "Same-day partial-correlation network. Positive=move together, negative=substitutes. Association only."}
+
+
+async def get_dependency_metrics() -> dict:
+    """Overall model quality vs the locked zero/AR-only/factor-only baselines."""
+    run = await _latest_dep_run()
+    if not run:
+        return {"available": False, "note": "no dependency run yet"}
+    o = await query(
+        f"SELECT round(mse_zero,8) AS mse_zero, round(mse_ar,8) AS mse_ar, "
+        f"round(mse_factor,8) AS mse_factor, round(dir_acc_ar,3) AS dir_acc_ar, "
+        f"round(rank_ic,4) AS rank_ic FROM forecast_metrics "
+        f"WHERE run_id='{run['run_id']}' AND scope='overall' LIMIT 1"
+    )
+    return {"available": True, "run_id": run["run_id"], "n_obs": run["n_obs"],
+            "n_folds": run["n_folds"], "n_edges": run["n_edges"],
+            "n_candidates": run["n_candidates"], "overall": o[0] if o else None,
+            "note": "dir acc ~0.5 and rank IC ~0 are normal at daily horizon."}
+
+
 TOOL_SCHEMAS: dict[str, dict] = {
     "list_symbols": {
         "name": "list_symbols",
@@ -477,6 +602,61 @@ TOOL_SCHEMAS: dict[str, dict] = {
             "required": ["query"],
         },
     },
+    "get_dependency_graph": {
+        "name": "get_dependency_graph",
+        "description": (
+            "The validated NSE dependency graph: directed lag-1 residual-return edges (src leads "
+            "dst by one day) that beat both AR-only and factor-only baselines out of sample. "
+            "Returns edges with coefficient, OOS improvement and sign consistency. Sparse or empty "
+            "is the normal, honest result at daily frequency — these are statistical, not causal."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            "limit": {"type": "integer", "description": "Max edges to return (default 20)."}}, "required": []},
+    },
+    "get_symbol_dependencies": {
+        "name": "get_symbol_dependencies",
+        "description": (
+            "For one symbol: its upstream drivers (names that lead it) and downstream dependents "
+            "(names it leads) in residual space, plus its model quality vs the AR baseline. Use to "
+            "explain what statistically precedes or follows a stock's idiosyncratic moves."
+        ),
+        "input_schema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]},
+    },
+    "get_dependency_shock": {
+        "name": "get_dependency_shock",
+        "description": (
+            "Scenario analysis: propagate a one-off % shock to one symbol's residual return through "
+            "the learned graph over N trading days. Returns the most-affected names with mean impact "
+            "and probabilities. Probabilistic scenario only — not causal and not advice."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            "symbol": {"type": "string"},
+            "shock_pct": {"type": "number", "description": "Initial shock in %, e.g. 5 (default 5)."},
+            "horizon": {"type": "integer", "description": "Trading-day horizon (default 5)."}},
+            "required": ["symbol"]},
+    },
+    "get_dependency_metrics": {
+        "name": "get_dependency_metrics",
+        "description": (
+            "Quality of the dependency forecaster vs its locked baselines (zero / AR-only / "
+            "factor-only): out-of-sample MSE, directional accuracy, rank IC, edge counts. Use to "
+            "judge HOW MUCH to trust the graph before citing it."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    "get_comovement_network": {
+        "name": "get_comovement_network",
+        "description": (
+            "Same-day co-movement structure: a partial-correlation network where a link means two "
+            "NSE names move together (or oppositely, = substitutes) on the same day even after "
+            "removing market/sector/macro factors AND every other stock. Pass a symbol for its "
+            "direct peers, or omit for the strongest links overall. Descriptive association, not "
+            "prediction and not causal — use to explain clusters/peers (business groups, sectors)."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            "symbol": {"type": "string", "description": "Optional: focus on one symbol's co-movement peers."},
+            "limit": {"type": "integer", "description": "Max links to return (default 15)."}}, "required": []},
+    },
 }
 
 HANDLERS = {
@@ -494,6 +674,10 @@ HANDLERS = {
     "get_filings": get_filings,
     "get_trends": get_trends,
     "web_search": web_search,
+    "get_dependency_graph": get_dependency_graph,
+    "get_symbol_dependencies": get_symbol_dependencies,
+    "get_dependency_shock": get_dependency_shock,
+    "get_dependency_metrics": get_dependency_metrics,
 }
 
 

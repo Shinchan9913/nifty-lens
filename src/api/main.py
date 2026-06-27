@@ -22,6 +22,7 @@ import requests
 from src.agents.bus import EventBus
 from src.agents.orchestrator import run_analysis
 from src.agents.team import AGENT_META
+from src.api.dependencies import router as dependencies_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,6 +41,8 @@ app.add_middleware(
 SPRITES_DIR = os.path.join(os.path.dirname(__file__), "..", "agents", "sprites")
 os.makedirs(SPRITES_DIR, exist_ok=True)
 app.mount("/agents/sprites", StaticFiles(directory=SPRITES_DIR), name="agent-sprites")
+
+app.include_router(dependencies_router)
 
 CLICKHOUSE_URL = "http://localhost:8123"
 

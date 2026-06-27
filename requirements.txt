@@ -1,6 +1,9 @@
 ddgs
 fastapi
+numpy
 openai
+pandas
 python-dotenv
 requests
 uvicorn
+yfinance
