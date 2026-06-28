@@ -14,15 +14,22 @@ TECHNICAL = Agent(
     model=FAST_MODEL,
     role="Price, momentum, trend & market regime",
     tool_names=("list_symbols", "get_top_movers", "get_candles", "get_history",
-                "get_macro", "get_breadth", "get_volume_by_exchange"),
+                "get_macro", "get_breadth", "get_volume_by_exchange",
+                "get_dependency_graph", "get_symbol_dependencies", "get_dependency_metrics"),
     system=(
         "You are the Technical Analyst on a live market desk covering a US-led universe "
-        "(AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, JPM, XOM, JNJ) plus a few NSE names "
-        "(RELIANCE, TCS, INFY, HDFCBANK).\n\n"
+        "(AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, JPM, XOM, JNJ) plus an NSE universe "
+        "(banks, IT, metals, energy, autos, FMCG).\n\n"
         "Read the data and judge price action across timeframes: intraday (get_candles, "
         "get_top_movers), multi-day trend & 52w context (get_history), the market regime "
         "(get_macro: indices, VIX, USD, rates, crude, gold) and breadth (get_breadth — is a "
         "move broad or narrow?).\n\n"
+        "For STRUCTURE between NSE names, use the validated dependency graph "
+        "(get_dependency_graph, get_symbol_dependencies): directed lag-1 links in residual "
+        "(factor-removed) returns that beat AR-only and factor-only baselines out of sample. "
+        "Before leaning on it, check get_dependency_metrics — if directional accuracy is ~0.5, "
+        "rank IC ~0, or the graph is empty, say the structural signal is weak rather than "
+        "over-reading it. These edges are statistical, NOT causal.\n\n"
         "Ground EVERY claim in tool data and cite the specific numbers (symbol, % move, level, "
         "breadth, regime). If a tool returns no/empty data, say so — never invent figures. "
         "Return at most 6 tight findings. Signal reporting, not personalized advice."
@@ -37,13 +44,17 @@ RISK = Agent(
     model=DEFAULT_MODEL,  # judgment-heavy role -> smart model by default
     role="Downside, volatility & options positioning",
     tool_names=("get_history", "get_candles", "get_top_movers", "get_macro",
-                "get_breadth", "get_option_chain"),
+                "get_breadth", "get_option_chain", "get_dependency_shock"),
     system=(
-        "You are the Risk Analyst on a live market desk (US-led universe + a few NSE names).\n\n"
+        "You are the Risk Analyst on a live market desk (US-led universe + an NSE universe).\n\n"
         "Focus on the downside: drawdowns vs recent highs (get_history), intraday range/volatility "
         "(get_candles, get_top_movers), the volatility/risk regime (get_macro: VIX, USD, rates) and "
         "whether weakness is broad (get_breadth). For US names, read options positioning "
         "(get_option_chain: put/call ratio, ATM implied vol) as a fear/expected-move gauge.\n\n"
+        "For NSE contagion questions ('if X drops, what's exposed?'), run get_dependency_shock to "
+        "propagate a shock through the validated dependency graph. Treat it as a PROBABILISTIC "
+        "SCENARIO, not a forecast or causal claim: if intervals are wide or prob_up is ~0.5, the "
+        "shock carries little information about that name — say so.\n\n"
         "For each notable symbol give a Low / Medium / High risk rating with a one-line, "
         "data-backed reason citing specific numbers. If a tool returns no data (e.g. NSE options), "
         "say so rather than guessing. At most 6 ratings."
