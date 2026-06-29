@@ -152,6 +152,11 @@
 .brief-short { color: var(--dim); font-size: 0.9rem; line-height: 1.55; }
 .link-btn { background: none; border: none; color: var(--text); font-size: 0.8rem; cursor: pointer; text-decoration: underline; }
 
+/* ---------------- point-in-time anchor ---------------- */
+.anchor { display: inline-flex; align-items: center; gap: 7px; font-size: 0.72rem; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-variant-numeric: tabular-nums; }
+.anchor strong { color: var(--dim); font-weight: 600; }
+.anchor-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+
 /* ---------------- verification ---------------- */
 .verify { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
 .verify-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.92rem; margin-bottom: 8px; }

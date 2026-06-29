@@ -35,9 +35,12 @@ Each item proves one agent competency a recruiter probes for. Tests-first where 
   (prompt-injection surface) and tags each fact with its source.
 
 **Supporting brag (cheap, high-credibility, fold in alongside A–E):**
-- **Point-in-time correctness** — one frozen snapshot anchor `T` per run; every data read
-  filters `timestamp <= T`. Makes runs honest (no lookahead) and reproducible. Carry `T` in
-  shared session state; it is also the cache key for C.
+- **Point-in-time correctness** — DONE. `src/agents/snapshot.py` holds a per-run anchor `T`
+  in a `ContextVar`; ClickHouse tools read it via `now_expr`/`asof_filter` so every data read
+  is filtered `<= T` (no lookahead, reproducible). Orchestrator freezes `T = max(timestamp)`
+  at kickoff, emits a `snapshot_anchor` SSE event, clears it in a `finally`. UI shows an
+  "as of T" pill. Tests: `tests/test_snapshot.py` (helper SQL) + `tests/test_tools_pit.py`
+  (tools actually use it, live vs anchored). `T` is also the cache key for C.
 - **Token/latency telemetry** — count tokens + wall-time per agent/run; expose a metrics
   endpoint. (Maps to the author's day-job cost-attribution work.)
 
@@ -46,8 +49,12 @@ prod — hand-rolling it proves little and complicates the story); dependency-gr
 headline (underperforms — keep as a minor tool only); deep quant nodes (CAR/order-flow)
 unless a domain anchor is needed.
 
-**NEXT ACTION:** implement **A. Reflexion loop**. Write `tests/test_reflexion.py` first
-(fake LLM client + bus), then wire `orchestrator.py`.
+**DONE so far:** A. Reflexion loop (committed); Point-in-time correctness (snapshot anchor
+wired through tools + orchestrator + UI pill).
+
+**NEXT ACTION:** implement **B. Planner agent**. Replace the hardcoded 3-way specialist
+fan-out with a Planner node that decomposes the question into a small task list at runtime;
+show the plan in the UI. Tests-first for the plan-parsing/decomposition logic.
 
 Housekeeping: add `pytest`, `pytest-asyncio` to `requirements.txt`.
 

@@ -14,7 +14,9 @@ import json
 import re
 
 from .bus import EventBus
+from .clickhouse import query
 from .llm import API_KEY, DEFAULT_MODEL, FAST_MODEL, get_client
+from .snapshot import clear_anchor, set_anchor
 from .team import SPECIALISTS, STRATEGIST, VERIFIER
 
 # force_model: override every agent's model. None = use each agent's own default.
@@ -134,6 +136,20 @@ async def _reinvestigate(client, bus: EventBus, verdict: dict, ledgers: dict, p:
     }
 
 
+async def _freeze_anchor() -> str:
+    """The run's point-in-time clock: the newest tick we have at kickoff.
+
+    Every ClickHouse read downstream is filtered ``<=`` this ``T`` (see ``snapshot.py``),
+    so the run sees the market exactly as it stood now — no lookahead, fully reproducible.
+    Best-effort: if the DB is unreachable we return "" and the run stays live (unanchored).
+    """
+    try:
+        rows = await query("SELECT toString(max(timestamp)) AS t FROM tick_data")
+    except Exception:
+        return ""
+    return (rows[0].get("t") or "").strip() if rows else ""
+
+
 async def run_analysis(question: str, bus: EventBus, depth: str = "balanced") -> None:
     if not API_KEY:
         await bus.emit("error", message="LLM_API_KEY is not set. Add LLM_* to the root .env and restart the API.")
@@ -141,6 +157,13 @@ async def run_analysis(question: str, bus: EventBus, depth: str = "balanced") ->
 
     p = DEPTH_PROFILES.get(depth, DEPTH_PROFILES["balanced"])
     client = get_client()
+
+    # Freeze the run's clock BEFORE any agent fans out. Child tasks inherit this anchor
+    # (contextvars are copied at task creation), so every tool call reads as-of the same T.
+    anchor = await _freeze_anchor()
+    set_anchor(anchor)
+    if anchor:
+        await bus.emit("snapshot_anchor", timestamp=anchor)
 
     async def consult(agent) -> tuple[str, str, list]:
         await bus.emit("agent_message", **{"from": "strategist", "to": agent.id, "content": question})
@@ -150,44 +173,48 @@ async def run_analysis(question: str, bus: EventBus, depth: str = "balanced") ->
         await bus.emit("agent_message", **{"from": agent.id, "to": "strategist", "content": answer})
         return agent.id, answer, ledger
 
-    # 1. fan out: specialists in parallel, collecting findings + evidence
-    results = await asyncio.gather(*[consult(a) for a in SPECIALISTS.values()])
-    ledgers = {aid: ledger for aid, _, ledger in results}
-    # The agent_id is shown to the Verifier so it can attribute each claim back to its author.
-    findings = "\n\n".join(f"## {SPECIALISTS[aid].name} [agent_id: {aid}] findings\n{ans}" for aid, ans, _ in results)
+    try:
+        # 1. fan out: specialists in parallel, collecting findings + evidence
+        results = await asyncio.gather(*[consult(a) for a in SPECIALISTS.values()])
+        ledgers = {aid: ledger for aid, _, ledger in results}
+        # The agent_id is shown to the Verifier so it can attribute each claim back to its author.
+        findings = "\n\n".join(f"## {SPECIALISTS[aid].name} [agent_id: {aid}] findings\n{ans}" for aid, ans, _ in results)
 
-    # 2. verify: audit the findings against the captured evidence
-    evidence_lines = [
-        f"[{aid}] {e['tool']}({e['input']}) -> {json.dumps(e['data'], default=str)[:300]}"
-        for aid, _, ledger in results for e in ledger
-    ][:40]
-    verify_task = (
-        f"User question: {question}\n\n"
-        f"FINDINGS:\n{findings}\n\nEVIDENCE (tool calls + data):\n" + ("\n".join(evidence_lines) or "(no tool data captured)")
-    )
-    verdict_text = await VERIFIER.run(client, bus, verify_task, max_rounds=1, model=p["force_model"])
-    verdicts = _parse_verdicts(verdict_text)
-    for v in verdicts:
-        await bus.emit("finding_verified", **v)
-
-    # 2b. REFLEXION: each refuted claim goes back to its author for one bounded re-investigation,
-    # then gets re-verified. This closes the adversarial loop instead of just reporting failures.
-    to_fix = _refuted_for_correction(verdicts, set(SPECIALISTS))
-    if to_fix:
-        corrections = await asyncio.gather(
-            *[_reinvestigate(client, bus, v, ledgers, p) for v in to_fix]
+        # 2. verify: audit the findings against the captured evidence
+        evidence_lines = [
+            f"[{aid}] {e['tool']}({e['input']}) -> {json.dumps(e['data'], default=str)[:300]}"
+            for aid, _, ledger in results for e in ledger
+        ][:40]
+        verify_task = (
+            f"User question: {question}\n\n"
+            f"FINDINGS:\n{findings}\n\nEVIDENCE (tool calls + data):\n" + ("\n".join(evidence_lines) or "(no tool data captured)")
         )
-        verdicts = _apply_corrections(verdicts, corrections)
-        for c in corrections:
-            await bus.emit("claim_correction", **c)
+        verdict_text = await VERIFIER.run(client, bus, verify_task, max_rounds=1, model=p["force_model"])
+        verdicts = _parse_verdicts(verdict_text)
+        for v in verdicts:
+            await bus.emit("finding_verified", **v)
 
-    # 3. synthesize: Strategist writes the briefing, aware of the verification
-    verification = "\n".join(f"- [{v['verdict']}] {v['claim']} — {v['reason']}" for v in verdicts) or "(no verdicts)"
-    synthesis_task = (
-        f"User question: {question}\n\n{p['note']}\n\n"
-        f"Specialist findings:\n{findings}\n\n"
-        f"Verifier verdicts (trust these — call out anything refuted or only uncertain):\n{verification}\n\n"
-        "Synthesize the briefing."
-    )
-    final = await STRATEGIST.run(client, bus, synthesis_task, max_rounds=2, model=p["force_model"])
-    await bus.emit("final_report", content=final)
+        # 2b. REFLEXION: each refuted claim goes back to its author for one bounded re-investigation,
+        # then gets re-verified. This closes the adversarial loop instead of just reporting failures.
+        to_fix = _refuted_for_correction(verdicts, set(SPECIALISTS))
+        if to_fix:
+            corrections = await asyncio.gather(
+                *[_reinvestigate(client, bus, v, ledgers, p) for v in to_fix]
+            )
+            verdicts = _apply_corrections(verdicts, corrections)
+            for c in corrections:
+                await bus.emit("claim_correction", **c)
+
+        # 3. synthesize: Strategist writes the briefing, aware of the verification
+        verification = "\n".join(f"- [{v['verdict']}] {v['claim']} — {v['reason']}" for v in verdicts) or "(no verdicts)"
+        synthesis_task = (
+            f"User question: {question}\n\n{p['note']}\n\n"
+            f"Specialist findings:\n{findings}\n\n"
+            f"Verifier verdicts (trust these — call out anything refuted or only uncertain):\n{verification}\n\n"
+            "Synthesize the briefing."
+        )
+        final = await STRATEGIST.run(client, bus, synthesis_task, max_rounds=2, model=p["force_model"])
+        await bus.emit("final_report", content=final)
+    finally:
+        # Drop back to live mode so this task's contextvar can't leak into a later run.
+        clear_anchor()

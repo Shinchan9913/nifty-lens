@@ -84,6 +84,7 @@ export default function AgentConsole() {
   const [lastMsg, setLastMsg] = useState<{ from: AgentId; to: AgentId; seq: number } | null>(null);
   const [modal, setModal] = useState<{ kind: "agent"; id: AgentId } | { kind: "briefing" } | null>(null);
   const [verdicts, setVerdicts] = useState<{ claim: string; agent?: string; verdict: "confirmed" | "uncertain" | "refuted"; reason: string; corrected?: boolean; revised_claim?: string }[]>([]);
+  const [anchor, setAnchor] = useState("");  // point-in-time clock T this run was frozen at
 
   // live market data for the charts
   const [movers, setMovers] = useState<Mover[]>([]);
@@ -129,7 +130,7 @@ export default function AgentConsole() {
     if (running || !query.trim()) return;
     setRunning(true);
     setStatus({}); setThinking({}); setOutput({}); setTimeline([]);
-    setReport(""); setError(""); setBubbles({}); setLastMsg(null); setModal(null); setVerdicts([]);
+    setReport(""); setError(""); setBubbles({}); setLastMsg(null); setModal(null); setVerdicts([]); setAnchor("");
 
     const es = new EventSource(`${API_BASE}/api/agents/stream?query=${encodeURIComponent(query)}&depth=${depth}`);
     esRef.current = es;
@@ -150,6 +151,7 @@ export default function AgentConsole() {
         case "tool_result":
           setTimeline((tl) => [...tl, { kind: "tool_result", agent: ev.agent, label: `${ev.tool} → ${ev.summary}`, ok: ev.ok, tool: ev.tool, input: ev.input, data: ev.data }]);
           break;
+        case "snapshot_anchor": setAnchor(ev.timestamp); break;
         case "finding_verified": setVerdicts((v) => [...v, { claim: ev.claim, agent: ev.agent, verdict: ev.verdict, reason: ev.reason }]); break;
         case "claim_correction":
           // Reflexion: a refuted claim came back re-investigated — update it in place.
@@ -245,6 +247,13 @@ export default function AgentConsole() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* ---------- point-in-time anchor ---------- */}
+      {anchor && (
+        <div className="anchor" title="Every data read in this run is filtered <= this moment — no lookahead, fully reproducible.">
+          <span className="anchor-dot" /> point-in-time · as of <strong>{anchor}</strong>
+        </div>
+      )}
 
       {/* ---------- verification ---------- */}
       {verdicts.length > 0 && (

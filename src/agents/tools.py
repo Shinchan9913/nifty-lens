@@ -10,6 +10,7 @@ import re
 import requests
 
 from .clickhouse import query
+from .snapshot import asof_filter, now_expr
 
 
 def _safe_symbol(value) -> str:
@@ -22,7 +23,7 @@ async def list_symbols(minutes: int = 10) -> list[dict]:
         f"""
         SELECT symbol, exchange, count() AS candles, round(avg(close), 2) AS avg_price
         FROM tick_data
-        WHERE timestamp >= (SELECT max(timestamp) FROM tick_data) - INTERVAL {int(minutes)} MINUTE
+        WHERE timestamp >= {now_expr()} - INTERVAL {int(minutes)} MINUTE{asof_filter()}
         GROUP BY symbol, exchange
         ORDER BY candles DESC
         """
@@ -36,7 +37,7 @@ async def get_candles(symbol: str, minutes: int = 15) -> list[dict]:
         SELECT toString(timestamp) AS time, open, high, low, close, volume
         FROM tick_data
         WHERE symbol = '{sym}'
-          AND timestamp >= (SELECT max(timestamp) FROM tick_data WHERE symbol = '{sym}') - INTERVAL {int(minutes)} MINUTE
+          AND timestamp >= {now_expr(where=f"symbol = '{sym}'")} - INTERVAL {int(minutes)} MINUTE{asof_filter()}
         ORDER BY timestamp
         """
     )
@@ -53,7 +54,7 @@ async def get_top_movers(minutes: int = 5, limit: int = 10) -> list[dict]:
             argMax(close, timestamp) AS close,
             sum(volume) AS volume
         FROM tick_data
-        WHERE timestamp >= (SELECT max(timestamp) FROM tick_data) - INTERVAL {int(minutes)} MINUTE
+        WHERE timestamp >= {now_expr()} - INTERVAL {int(minutes)} MINUTE{asof_filter()}
         GROUP BY symbol, exchange
         ORDER BY (high - low) / open DESC
         LIMIT {int(limit)}
@@ -71,7 +72,7 @@ async def get_volume_by_exchange(minutes: int = 5) -> list[dict]:
         f"""
         SELECT exchange, count() AS candles, round(sum(volume), 2) AS total_volume
         FROM tick_data
-        WHERE timestamp >= (SELECT max(timestamp) FROM tick_data) - INTERVAL {int(minutes)} MINUTE
+        WHERE timestamp >= {now_expr()} - INTERVAL {int(minutes)} MINUTE{asof_filter()}
         GROUP BY exchange
         ORDER BY total_volume DESC
         """
@@ -97,7 +98,7 @@ async def get_history(symbol: str, days: int = 60) -> dict:
         SELECT toString(date) AS dt, open, high, low, close, volume
         FROM daily_bars
         WHERE symbol = '{sym}'
-          AND date >= (SELECT max(date) FROM daily_bars WHERE symbol = '{sym}') - INTERVAL {int(days)} DAY
+          AND date >= {now_expr("date", "daily_bars", where=f"symbol = '{sym}'")} - INTERVAL {int(days)} DAY{asof_filter("date")}
         ORDER BY date
         """
     )
@@ -121,10 +122,10 @@ async def get_history(symbol: str, days: int = 60) -> dict:
 async def get_macro() -> list[dict]:
     """Latest level + 1-day and 5-day % change for every macro / cross-asset series."""
     rows = await query(
-        """
+        f"""
         SELECT symbol, category, close
         FROM macro_bars
-        WHERE date >= (SELECT max(date) FROM macro_bars) - INTERVAL 9 DAY
+        WHERE date >= {now_expr("date", "macro_bars")} - INTERVAL 9 DAY{asof_filter("date")}
         ORDER BY symbol, date
         """
     )
@@ -150,10 +151,10 @@ async def get_macro() -> list[dict]:
 async def get_breadth() -> dict:
     """Market breadth across the daily-bars universe: advancers/decliners + % above 50d SMA."""
     rows = await query(
-        """
+        f"""
         SELECT symbol, close
         FROM daily_bars
-        WHERE date >= (SELECT max(date) FROM daily_bars) - INTERVAL 60 DAY
+        WHERE date >= {now_expr("date", "daily_bars")} - INTERVAL 60 DAY{asof_filter("date")}
         ORDER BY symbol, date
         """
     )
