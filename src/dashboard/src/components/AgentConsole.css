@@ -164,6 +164,7 @@
 .vclaim { color: var(--dim); flex: 1; min-width: 220px; }
 .v-refuted .vclaim { text-decoration: line-through; color: var(--muted); }
 .vreason { color: var(--muted); font-size: 0.76rem; width: 100%; }
+.vfixed { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; font-weight: 700; white-space: nowrap; background: #1a2c33; color: #38bdf8; cursor: help; }
 
 /* ---------------- ticker ---------------- */
 .ticker { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }

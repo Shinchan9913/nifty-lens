@@ -83,7 +83,7 @@ export default function AgentConsole() {
   const [bubbles, setBubbles] = useState<Record<string, string>>({});
   const [lastMsg, setLastMsg] = useState<{ from: AgentId; to: AgentId; seq: number } | null>(null);
   const [modal, setModal] = useState<{ kind: "agent"; id: AgentId } | { kind: "briefing" } | null>(null);
-  const [verdicts, setVerdicts] = useState<{ claim: string; verdict: "confirmed" | "uncertain" | "refuted"; reason: string }[]>([]);
+  const [verdicts, setVerdicts] = useState<{ claim: string; agent?: string; verdict: "confirmed" | "uncertain" | "refuted"; reason: string; corrected?: boolean; revised_claim?: string }[]>([]);
 
   // live market data for the charts
   const [movers, setMovers] = useState<Mover[]>([]);
@@ -150,7 +150,14 @@ export default function AgentConsole() {
         case "tool_result":
           setTimeline((tl) => [...tl, { kind: "tool_result", agent: ev.agent, label: `${ev.tool} → ${ev.summary}`, ok: ev.ok, tool: ev.tool, input: ev.input, data: ev.data }]);
           break;
-        case "finding_verified": setVerdicts((v) => [...v, { claim: ev.claim, verdict: ev.verdict, reason: ev.reason }]); break;
+        case "finding_verified": setVerdicts((v) => [...v, { claim: ev.claim, agent: ev.agent, verdict: ev.verdict, reason: ev.reason }]); break;
+        case "claim_correction":
+          // Reflexion: a refuted claim came back re-investigated — update it in place.
+          setVerdicts((v) => v.map((row) =>
+            row.claim === ev.claim && row.agent === ev.agent
+              ? { ...row, verdict: ev.verdict, reason: ev.reason, corrected: true, revised_claim: ev.revised_claim }
+              : row));
+          break;
         case "final_report": setReport(ev.content); break;
         case "error": setError(ev.message); break;
         case "run_finished": es.close(); setRunning(false); break;
@@ -253,7 +260,8 @@ export default function AgentConsole() {
           {verdicts.map((v, i) => (
             <div key={i} className={`vrow v-${v.verdict}`}>
               <span className="vbadge">{v.verdict}</span>
-              <span className="vclaim">{v.claim}</span>
+              <span className="vclaim">{v.corrected && v.revised_claim ? v.revised_claim : v.claim}</span>
+              {v.corrected && <span className="vfixed" title={`Original: ${v.claim}`}>self-corrected</span>}
               {v.reason && <span className="vreason">{v.reason}</span>}
             </div>
           ))}

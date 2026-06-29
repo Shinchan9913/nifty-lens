@@ -36,8 +36,16 @@ DEPTH_PROFILES = {
 }
 
 
+# Reflexion: at most this many refuted claims get a re-investigation pass (bounds token cost).
+MAX_CORRECTIONS = 3
+
+
 def _parse_verdicts(text: str) -> list[dict]:
-    """Extract the Verifier's JSON array of verdicts, defensively."""
+    """Extract the Verifier's JSON array of verdicts, defensively.
+
+    Each verdict may carry an `agent` (the specialist the claim came from) so the
+    Reflexion loop knows who to send a refuted claim back to.
+    """
     m = re.search(r"\[.*\]", text, re.S)
     if not m:
         return []
@@ -48,8 +56,82 @@ def _parse_verdicts(text: str) -> list[dict]:
     out = []
     for v in arr:
         if isinstance(v, dict) and v.get("claim") and v.get("verdict") in ("confirmed", "uncertain", "refuted"):
-            out.append({"claim": str(v["claim"])[:220], "verdict": v["verdict"], "reason": str(v.get("reason", ""))[:240]})
+            out.append({
+                "claim": str(v["claim"])[:220],
+                "verdict": v["verdict"],
+                "reason": str(v.get("reason", ""))[:240],
+                "agent": str(v.get("agent", "")).strip().lower(),
+            })
     return out
+
+
+def _refuted_for_correction(verdicts: list[dict], specialist_ids: set[str]) -> list[dict]:
+    """Refuted claims we can actually re-investigate — i.e. attributed to a real specialist."""
+    return [v for v in verdicts if v["verdict"] == "refuted" and v.get("agent") in specialist_ids][:MAX_CORRECTIONS]
+
+
+def _apply_corrections(verdicts: list[dict], corrections: list[dict]) -> list[dict]:
+    """Fold re-verified corrections back into the verdict list (pure; unit-tested).
+
+    A correction matches its original verdict by (agent, claim); the matched entry's
+    verdict/reason are replaced with the re-verified outcome and tagged `corrected`.
+    Unmatched verdicts pass through unchanged.
+    """
+    by_key = {(c["agent"], c["claim"]): c for c in corrections}
+    out = []
+    for v in verdicts:
+        c = by_key.get((v.get("agent"), v["claim"]))
+        if c is None:
+            out.append(v)
+            continue
+        merged = dict(v)
+        merged.update(verdict=c["verdict"], reason=c["reason"],
+                      revised_claim=c.get("revised_claim", ""), corrected=True)
+        out.append(merged)
+    return out
+
+
+async def _reinvestigate(client, bus: EventBus, verdict: dict, ledgers: dict, p: dict) -> dict:
+    """Send one refuted claim back to its author specialist, then re-verify the fix.
+
+    Returns a correction record (same agent+claim key as the original verdict) carrying the
+    re-verified outcome. Bounded to a couple of tool rounds so the loop can't run away.
+    """
+    aid = verdict["agent"]
+    agent = SPECIALISTS[aid]
+    ledger = ledgers.get(aid, [])
+    evidence = "\n".join(
+        f"{e['tool']}({e['input']}) -> {json.dumps(e['data'], default=str)[:200]}" for e in ledger
+    )[:1500]
+
+    await bus.emit("agent_message", **{"from": "verifier", "to": aid, "content": f"REFUTED: {verdict['claim']}"})
+    fix_task = (
+        "A claim you made was REFUTED by the desk's fact-checker.\n"
+        f"Your claim: {verdict['claim']}\n"
+        f"Why it was refuted: {verdict['reason']}\n\n"
+        f"Your prior evidence:\n{evidence or '(none captured)'}\n\n"
+        "Re-investigate THIS specific point with your tools. Reply with ONE corrected, "
+        "evidence-backed sentence — or, if the refutation is right, say so plainly."
+    )
+    revised = await agent.run(client, bus, fix_task, max_rounds=2, model=p["force_model"], ledger=ledger)
+
+    # Re-verify the corrected statement against the (now-extended) evidence.
+    re_evidence = "\n".join(
+        f"{e['tool']}({e['input']}) -> {json.dumps(e['data'], default=str)[:200]}" for e in ledger
+    )[:1800]
+    reverify = await VERIFIER.run(
+        client, bus, f"Claim: {revised}\n\nEVIDENCE:\n{re_evidence or '(none)'}",
+        max_rounds=1, model=p["force_model"],
+    )
+    rv = _parse_verdicts(reverify)
+    return {
+        "agent": aid,
+        "claim": verdict["claim"],
+        "revised_claim": revised.strip()[:220],
+        "verdict": rv[0]["verdict"] if rv else "uncertain",
+        "reason": rv[0]["reason"] if rv else "re-verified after correction",
+        "corrected": True,
+    }
 
 
 async def run_analysis(question: str, bus: EventBus, depth: str = "balanced") -> None:
@@ -70,7 +152,9 @@ async def run_analysis(question: str, bus: EventBus, depth: str = "balanced") ->
 
     # 1. fan out: specialists in parallel, collecting findings + evidence
     results = await asyncio.gather(*[consult(a) for a in SPECIALISTS.values()])
-    findings = "\n\n".join(f"## {SPECIALISTS[aid].name} findings\n{ans}" for aid, ans, _ in results)
+    ledgers = {aid: ledger for aid, _, ledger in results}
+    # The agent_id is shown to the Verifier so it can attribute each claim back to its author.
+    findings = "\n\n".join(f"## {SPECIALISTS[aid].name} [agent_id: {aid}] findings\n{ans}" for aid, ans, _ in results)
 
     # 2. verify: audit the findings against the captured evidence
     evidence_lines = [
@@ -85,6 +169,17 @@ async def run_analysis(question: str, bus: EventBus, depth: str = "balanced") ->
     verdicts = _parse_verdicts(verdict_text)
     for v in verdicts:
         await bus.emit("finding_verified", **v)
+
+    # 2b. REFLEXION: each refuted claim goes back to its author for one bounded re-investigation,
+    # then gets re-verified. This closes the adversarial loop instead of just reporting failures.
+    to_fix = _refuted_for_correction(verdicts, set(SPECIALISTS))
+    if to_fix:
+        corrections = await asyncio.gather(
+            *[_reinvestigate(client, bus, v, ledgers, p) for v in to_fix]
+        )
+        verdicts = _apply_corrections(verdicts, corrections)
+        for c in corrections:
+            await bus.emit("claim_correction", **c)
 
     # 3. synthesize: Strategist writes the briefing, aware of the verification
     verification = "\n".join(f"- [{v['verdict']}] {v['claim']} — {v['reason']}" for v in verdicts) or "(no verdicts)"

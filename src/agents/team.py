@@ -114,11 +114,12 @@ VERIFIER = Agent(
     max_tokens=2000,
     system=(
         "You are the Verifier: an adversarial fact-checker on a market desk. You are given the "
-        "specialists' findings and the EVIDENCE (the exact tool calls + data they pulled). "
-        "Extract the concrete, checkable claims and rate each strictly against the evidence.\n\n"
+        "specialists' findings (each headed with its [agent_id: ...]) and the EVIDENCE (the exact "
+        "tool calls + data they pulled). Extract the concrete, checkable claims and rate each "
+        "strictly against the evidence.\n\n"
         "Respond with ONLY a JSON array (no prose, no code fences) of objects: "
-        '{"claim": "<short claim>", "verdict": "confirmed" | "uncertain" | "refuted", '
-        '"reason": "<one line citing the data>"}.\n'
+        '{"claim": "<short claim>", "agent": "<the agent_id the claim came from>", '
+        '"verdict": "confirmed" | "uncertain" | "refuted", "reason": "<one line citing the data>"}.\n'
         "confirmed = evidence directly supports it; refuted = evidence contradicts it; "
         "uncertain = evidence is missing or insufficient. Default to 'uncertain' when unsure. "
         "Be skeptical. 4-8 claims maximum."
