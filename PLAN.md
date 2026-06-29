@@ -21,9 +21,11 @@ Each item proves one agent competency a recruiter probes for. Tests-first where 
   ONE bounded re-investigation by the originating specialist (critique + evidence fed back),
   then re-verify. Emit `claim_correction` events so the UI shows the loop. Files:
   `orchestrator.py` (+ `team.py` verifier prompt emits source agent). Bound by `max_rounds`.
-- **B. Planner agent** *(planning / decomposition)* — replace the hardcoded 3-way fan-out
-  with a Planner node that, at runtime, decomposes the question into a small task list
-  (which specialists, what each should focus on) → executor runs them. Show the plan in the UI.
+- **B. Planner agent** *(planning / decomposition)* — DONE. `PLANNER` (team.py) decomposes the
+  question into a JSON task list `[{specialist, focus}]`; `_parse_plan` (orchestrator.py, pure +
+  unit-tested) sanitises it (known specialists, dedupe, cap, truncate) with a fallback to all
+  specialists on junk. Executor fans out over the plan with each specialist's focus. `plan` SSE
+  event → "Plan" panel in the UI. Tests: `tests/test_planner.py`.
 - **C. Deliberation cache** *(memory, done right)* — cross-run cache keyed by
   `(normalized_question, depth, snapshot_anchor)`. Same question at the same frozen moment
   reuses the prior briefing instead of re-spending tokens. Ties into point-in-time below.
@@ -49,12 +51,13 @@ prod — hand-rolling it proves little and complicates the story); dependency-gr
 headline (underperforms — keep as a minor tool only); deep quant nodes (CAR/order-flow)
 unless a domain anchor is needed.
 
-**DONE so far:** A. Reflexion loop (committed); Point-in-time correctness (snapshot anchor
-wired through tools + orchestrator + UI pill).
+**DONE so far:** A. Reflexion loop; Point-in-time correctness (snapshot anchor wired through
+tools + orchestrator + UI pill); B. Planner agent (runtime decomposition + UI plan panel).
 
-**NEXT ACTION:** implement **B. Planner agent**. Replace the hardcoded 3-way specialist
-fan-out with a Planner node that decomposes the question into a small task list at runtime;
-show the plan in the UI. Tests-first for the plan-parsing/decomposition logic.
+**NEXT ACTION:** implement **C. Deliberation cache**. Cross-run cache keyed by
+`(normalized_question, depth, snapshot_anchor)` — the same question at the same frozen `T`
+reuses the prior briefing instead of re-spending tokens. The anchor from the point-in-time
+work is the cache key. Tests-first for the key-normalisation + hit/miss logic.
 
 Housekeeping: add `pytest`, `pytest-asyncio` to `requirements.txt`.
 

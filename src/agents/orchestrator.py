@@ -17,7 +17,7 @@ from .bus import EventBus
 from .clickhouse import query
 from .llm import API_KEY, DEFAULT_MODEL, FAST_MODEL, get_client
 from .snapshot import clear_anchor, set_anchor
-from .team import SPECIALISTS, STRATEGIST, VERIFIER
+from .team import PLANNER, SPECIALISTS, STRATEGIST, VERIFIER
 
 # force_model: override every agent's model. None = use each agent's own default.
 DEPTH_PROFILES = {
@@ -40,6 +40,39 @@ DEPTH_PROFILES = {
 
 # Reflexion: at most this many refuted claims get a re-investigation pass (bounds token cost).
 MAX_CORRECTIONS = 3
+
+# Planner: never fan out to more than this many specialist tasks (bounds the run).
+MAX_PLAN_TASKS = 3
+
+
+def _parse_plan(text: str, specialist_ids: set[str]) -> list[dict]:
+    """Extract the Planner's task list ``[{specialist, focus}]``, defensively.
+
+    Keeps only tasks aimed at a real specialist with a non-empty focus, dedupes to one
+    task per specialist (first focus wins), caps the fan-out, and truncates focus text.
+    Returns ``[]`` when nothing is usable — the caller then falls back to consulting every
+    specialist with the raw question, so a junk plan can never silently drop the analysis.
+    """
+    m = re.search(r"\[.*\]", text, re.S)
+    if not m:
+        return []
+    try:
+        arr = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in arr:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("specialist", "")).strip().lower()
+        focus = str(item.get("focus", "")).strip()
+        if sid in specialist_ids and focus and sid not in seen:
+            seen.add(sid)
+            out.append({"specialist": sid, "focus": focus[:300]})
+        if len(out) >= MAX_PLAN_TASKS:
+            break
+    return out
 
 
 def _parse_verdicts(text: str) -> list[dict]:
@@ -165,17 +198,28 @@ async def run_analysis(question: str, bus: EventBus, depth: str = "balanced") ->
     if anchor:
         await bus.emit("snapshot_anchor", timestamp=anchor)
 
-    async def consult(agent) -> tuple[str, str, list]:
-        await bus.emit("agent_message", **{"from": "strategist", "to": agent.id, "content": question})
-        task = f"{p['note']}\n\nQuestion: {question}"
+    async def consult(item: dict) -> tuple[str, str, list]:
+        agent = SPECIALISTS[item["specialist"]]
+        focus = item["focus"]
+        await bus.emit("agent_message", **{"from": "strategist", "to": agent.id, "content": focus})
+        task = f"{p['note']}\n\nUser question: {question}\n\nYour focus for this question: {focus}"
         ledger: list = []
         answer = await agent.run(client, bus, task, max_rounds=p["rounds"], model=p["force_model"], ledger=ledger)
         await bus.emit("agent_message", **{"from": agent.id, "to": "strategist", "content": answer})
         return agent.id, answer, ledger
 
     try:
-        # 1. fan out: specialists in parallel, collecting findings + evidence
-        results = await asyncio.gather(*[consult(a) for a in SPECIALISTS.values()])
+        # 0. plan: the Planner decomposes the question into a focused task per specialist.
+        # If it returns nothing usable we fall back to consulting everyone with the raw question,
+        # so planning can sharpen the run but never silently drop a specialist.
+        plan_text = await PLANNER.run(client, bus, f"User question: {question}", max_rounds=1, model=p["force_model"])
+        plan = _parse_plan(plan_text, set(SPECIALISTS))
+        if not plan:
+            plan = [{"specialist": aid, "focus": question} for aid in SPECIALISTS]
+        await bus.emit("plan", tasks=[{"agent": t["specialist"], "focus": t["focus"]} for t in plan])
+
+        # 1. fan out: planned specialists in parallel, collecting findings + evidence
+        results = await asyncio.gather(*[consult(item) for item in plan])
         ledgers = {aid: ledger for aid, _, ledger in results}
         # The agent_id is shown to the Verifier so it can attribute each claim back to its author.
         findings = "\n\n".join(f"## {SPECIALISTS[aid].name} [agent_id: {aid}] findings\n{ans}" for aid, ans, _ in results)

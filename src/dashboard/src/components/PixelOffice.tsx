@@ -182,6 +182,7 @@ export default function PixelOffice({
       for (const m of couriers.current) {
         m.t += dt / 0.9;
         const f = chars.current[m.from], t2 = chars.current[m.to];
+        if (!f || !t2) continue;  // skip messages to/from anyone without a desk (e.g. the Planner)
         const x = lerp(f.x, t2.x, ease(m.t));
         const y = lerp(f.y, t2.y, ease(m.t)) - Math.sin(m.t * Math.PI) * 16 - 8;
         ctx.fillStyle = "#0c0c0e"; ctx.fillRect(x - 4, y - 3, 8, 6);

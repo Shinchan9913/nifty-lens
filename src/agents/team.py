@@ -84,6 +84,29 @@ RESEARCH = Agent(
     ),
 )
 
+PLANNER = Agent(
+    agent_id="planner",
+    name="Planner",
+    emoji="",
+    color="#0ea5e9",
+    model=DEFAULT_MODEL,  # decomposition quality sets up the whole run
+    role="Decomposes the question into a focused task per specialist",
+    max_tokens=1024,
+    system=(
+        "You are the desk's Planner. Given the user's market question, decide which specialists "
+        "should investigate it and what each should focus on. The specialists are:\n"
+        "- technical: price action, momentum, trend, market regime, breadth, NSE dependency structure.\n"
+        "- risk: downside, drawdowns, volatility, options positioning, contagion / shock scenarios.\n"
+        "- research: catalysts, news, fundamentals, analyst views, filings, search-interest sentiment.\n\n"
+        "Pick ONLY the specialists whose lens the question genuinely needs — often all three, but "
+        "skip any that would add nothing. Give each a specific instruction tied to THIS question "
+        "(name the symbols/angle), not a generic restatement.\n\n"
+        "Respond with ONLY a JSON array (no prose, no code fences) of objects: "
+        '{"specialist": "technical" | "risk" | "research", "focus": "<one specific instruction>"}. '
+        "At most one object per specialist."
+    ),
+)
+
 STRATEGIST = Agent(
     agent_id="strategist",
     name="Portfolio Strategist",
