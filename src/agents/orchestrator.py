@@ -201,7 +201,7 @@ async def run_analysis(question: str, bus: EventBus, depth: str = "balanced") ->
     async def consult(item: dict) -> tuple[str, str, list]:
         agent = SPECIALISTS[item["specialist"]]
         focus = item["focus"]
-        await bus.emit("agent_message", **{"from": "strategist", "to": agent.id, "content": focus})
+        await bus.emit("agent_message", **{"from": "planner", "to": agent.id, "content": focus})
         task = f"{p['note']}\n\nUser question: {question}\n\nYour focus for this question: {focus}"
         ledger: list = []
         answer = await agent.run(client, bus, task, max_rounds=p["rounds"], model=p["force_model"], ledger=ledger)

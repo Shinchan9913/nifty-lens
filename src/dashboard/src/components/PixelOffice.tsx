@@ -16,7 +16,7 @@ import { useEffect, useRef } from "react";
  * grayscale-filtered (see CSS) so colorful sheets still render monochrome.
  */
 
-type AgentId = "strategist" | "technical" | "risk" | "research";
+type AgentId = "strategist" | "planner" | "technical" | "risk" | "research";
 type Status = "idle" | "working" | "thinking" | "done";
 type Dir = "down" | "up" | "left" | "right";
 
@@ -41,6 +41,8 @@ const WALK: Omit<SpriteConfig, "src"> = {
 };
 const SPRITES: Record<AgentId, SpriteConfig | null> = {
   strategist: { src: `${SPRITE_BASE}/strategist.png`, ...WALK },
+  // Planner reuses the strategist sprite (same "lead" figure family); the nameplate disambiguates.
+  planner:    { src: `${SPRITE_BASE}/strategist.png`, ...WALK },
   technical:  { src: `${SPRITE_BASE}/technical.png`,  ...WALK },
   risk:       { src: `${SPRITE_BASE}/risk.png`,        ...WALK },
   research:   { src: `${SPRITE_BASE}/research.png`,    ...WALK },
@@ -53,6 +55,7 @@ const DPR = 2; // canvas backing-store scale — render at 2x then let CSS downs
 interface Zone { x: number; y: number; }
 const AGENTS: { id: AgentId; name: string; emoji: string; shade: string; desk: Zone; chair: Zone }[] = [
   { id: "strategist", name: "Strategist", emoji: "", shade: "#fafafa", desk: { x: 170, y: 40 }, chair: { x: 170, y: 64 } },
+  { id: "planner", name: "Planner", emoji: "", shade: "#e4e4ea", desk: { x: 272, y: 40 }, chair: { x: 272, y: 64 } },
   { id: "technical", name: "Technical", emoji: "", shade: "#d4d4d8", desk: { x: 70, y: 120 }, chair: { x: 70, y: 144 } },
   { id: "risk", name: "Risk", emoji: "", shade: "#a1a1aa", desk: { x: 270, y: 120 }, chair: { x: 270, y: 144 } },
   { id: "research", name: "Research", emoji: "", shade: "#8a8a93", desk: { x: 170, y: 178 }, chair: { x: 170, y: 200 } },

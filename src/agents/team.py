@@ -177,5 +177,5 @@ CONSULT_TOOL = {
 # Lightweight metadata the frontend uses to render the agent cards.
 AGENT_META = [
     {"id": a.id, "name": a.name, "emoji": a.emoji, "color": a.color, "role": a.role}
-    for a in (STRATEGIST, TECHNICAL, RISK, RESEARCH)
+    for a in (STRATEGIST, PLANNER, TECHNICAL, RISK, RESEARCH)
 ]

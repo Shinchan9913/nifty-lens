@@ -11,12 +11,13 @@ const UP = "#22c55e";
 const DOWN = "#ef4444";
 const NEUTRAL = "#6b7280";
 
-type AgentId = "strategist" | "technical" | "risk" | "research";
+type AgentId = "strategist" | "planner" | "technical" | "risk" | "research";
 
 interface AgentMeta { id: AgentId; name: string; emoji: string; role: string; x: number; y: number; }
 
 const AGENTS: AgentMeta[] = [
   { id: "strategist", name: "Strategist", emoji: "", role: "Lead · coordinates the desk", x: 50, y: 18 },
+  { id: "planner", name: "Planner", emoji: "", role: "Plans the investigation", x: 80, y: 18 },
   { id: "technical", name: "Technical", emoji: "", role: "Price · momentum · volume", x: 16, y: 70 },
   { id: "risk", name: "Risk", emoji: "", role: "Downside · risk ratings", x: 50, y: 82 },
   { id: "research", name: "Research", emoji: "", role: "News · web sentiment", x: 84, y: 70 },
